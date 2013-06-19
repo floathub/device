@@ -58,7 +58,7 @@
   Compile time option/debug flags
 */
 
-//#define GPRS_DEBUG_ON
+#define GPRS_DEBUG_ON
 //#define GPS_DEBUG_ON
 //#define PUMP_DEBUG_ON
 //#define EXECUTION_PATH_DEBUG_ON
@@ -132,9 +132,9 @@ unsigned long last_detailed_eeprom_write;
   Status LED's
 */
 
-#define RED_LED	    12
-#define YELLOW_LED  11
-#define GREEN_LED   10
+#define RED_LED	    9
+#define YELLOW_LED  8
+#define GREEN_LED   6
 
 /*
    Some global Strings, character arrays
