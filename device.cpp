@@ -42,7 +42,22 @@
 #include "libs/Base64/Base64.h"
 #include <avr/wdt.h>
 #include <util/crc16.h>
+#include <WiFi.h>
 
+/*
+  Compile time option/debug flags
+*/
+
+#define   WIFI_NOT_CELL
+//#define WIFI_DEBUG_ON
+//#define GPRS_DEBUG_ON
+//#define GPS_DEBUG_ON
+//#define PUMP_DEBUG_ON
+//#define EXECUTION_PATH_DEBUG_ON
+//#define NMEA_DEBUG_ON
+//#define DEBUG_MEMORY_ON
+//#define BYPASS_AES_ON
+//#define BARO_DEBUG_ON	
 
 /*
   Anything which changes what the Floathub Data Receiver (fdr) needs to do
@@ -52,19 +67,13 @@
 
 #define  FLOATHUB_PROTOCOL_VERSION 1
 #define  FLOATHUB_ENCRYPT_VERSION  2
-#define  FLOATHUB_MODEL_DESCRIPTION "FC4-1.1"
+#ifdef WIFI_NOT_CELL
+#define  FLOATHUB_MODEL_DESCRIPTION "FW5-1.1"
+#else
+#define  FLOATHUB_MODEL_DESCRIPTION "FC5-1.1"
+#endif
 
-/*
-  Compile time option/debug flags
-*/
 
-#define GPRS_DEBUG_ON
-//#define GPS_DEBUG_ON
-//#define PUMP_DEBUG_ON
-//#define EXECUTION_PATH_DEBUG_ON
-//#define NMEA_DEBUG_ON
-//#define DEBUG_MEMORY_ON
-//#define BYPASS_AES_ON	
 
 /*
   Some AES variables
@@ -143,6 +152,8 @@ unsigned long last_detailed_eeprom_write;
 String latest_message_to_send = "";
 String new_message = "";
 char   temp_string[20];  
+char temp_string_a[41];
+char temp_string_b[41];
 
 /*
   Handy variables to use at various stages (better to be global, less memory)
@@ -169,10 +180,12 @@ unsigned long voltage_interval = 5000;            //  Check batteries/chargers e
 unsigned long gprs_interval = 500;                //  Check GPRS every 500 milliseconds
 unsigned long pump_interval = 1200;               //  Check pump state every 1.2 seconds
 unsigned long active_reporting_interval = 30000;  //  When in use, report data every 30 seconds
-unsigned long idle_reporting_interval = 600000;    //  When idle, report data every 10 minutes
+unsigned long idle_reporting_interval = 600000;   //  When idle, report data every 10 minutes
 unsigned long console_reporting_interval = 5000;  //  Report to USB console every 5 seconds  
 unsigned long console_interval = 500;             //  Check console for input every 400 milliseconds
 unsigned long gprs_watchdog_interval = 90000;     //  Reboot the GPRS module after 90 seconds of no progress
+unsigned long wifi_scan_interval = 30000;         //  How often to look for wifi networks
+unsigned long wifi_read_interval = 500;           //  Do wifi i/o communications twice a second
 unsigned long led_update_interval = 200;          //  Update the LED's every 200 miliseconds
 unsigned long nmea_update_interval = 100;         //  Update NMEA in serial line every 1/10 of a second
 boolean green_led_state = false;         	  //  For cycling on and off  
@@ -190,6 +203,8 @@ unsigned long console_previous_timestamp = 0;
 unsigned long led_previous_timestamp = 0;
 unsigned long nmea_previous_timestamp = 0;
 unsigned long hardware_watchdog_timestamp = 0;
+unsigned long wifi_scan_previous_timestamp = 0;
+unsigned long wifi_read_previous_timestamp = 0;  
 
 /*
   Is the device currently "active" (i.e. is the vessel in movement and sending high frequency updates)?
@@ -203,7 +218,21 @@ bool currently_active = true;
   
 long gprs_watchdog_timestamp = 0;
 #define	MAX_GPRS_READ_BUFFER	64
- 
+
+#ifdef WIFI_NOT_CELL
+WiFiClient wifi_client;
+bool wifi_on_home_network;
+
+enum wireless_communication_state
+{
+    idle,
+    waiting_for_response,
+};
+        
+wireless_communication_state wifi_communication_state = idle; 
+
+#else 
+
 enum connection_state
 {
     waiting_for_sind,
@@ -230,6 +259,9 @@ enum communication_state
   
 communication_state gprs_communication_state = idle;
 
+
+#endif
+
 /*
 
   We use I2C (Wire) for Pressure and Temp
@@ -238,8 +270,12 @@ communication_state gprs_communication_state = idle;
 
 Adafruit_BMP085 bmp;
 
+#define BARO_HISTORY_LENGTH 10
 float temperature;
 float pressure;
+float pressure_history[BARO_HISTORY_LENGTH];
+float temperature_history[BARO_HISTORY_LENGTH];
+
 
 /*
   Some global variables used in parsing from the GPS module
@@ -247,8 +283,8 @@ float pressure;
 
 #define MAX_GPS_BUFFER	 200
 #define	MAX_NMEA_BUFFER	 100
-String gps_parse_buffer = "";
 String gps_read_buffer = "";
+String wifi_read_buffer = "";
 String nmea_read_buffer = "";
 
 bool           gps_valid = false;
@@ -334,7 +370,12 @@ void print_free_memory()
 
 void bmp_setup()
 {
-  bmp.begin();   
+  bmp.begin();
+  for(i = 0; i < BARO_HISTORY_LENGTH; i++)
+  {
+    pressure_history[i] = 0.0;
+    temperature_history[i] = 0.0;
+  }   
 }
 
 void gps_setup()
@@ -354,18 +395,20 @@ void gps_setup()
   Serial3.println(F("$PSRF103,05,00,00,01*21"));  //  VTG Off
 }
 
+#ifndef WIFI_NOT_CELL
 void gprs_setup()
 {
+
   //
   //  Setup GPRS cellular data on Serial1
   //
   
   Serial1.begin(9600);
-  latest_message_to_send = "";
   gprs_connection_state = waiting_for_sind;
   gprs_communication_state = idle;
   gprs_watchdog_timestamp = millis();
 }
+#endif
 
 void watchdog_setup()
 {
@@ -456,7 +499,7 @@ void init_eeprom_memory()
   EEPROM.write(89, 44);
   
   //
-  //  set default gprs apn
+  //  set default gprs apn / wireless network name
   //
   
   EEPROM.write(90, 'a');
@@ -469,12 +512,6 @@ void init_eeprom_memory()
   EEPROM.write(97, 'e');
   
   EEPROM.write(98, '\0');
-  
-  //for(i = 0; i < default_gprs_apn.length(); i++)
-  //{
-  //  EEPROM.write(280 + i, default_gprs_apn[i]);
-  //}
-  //EEPROM.write(280+i, '\0');
   
   //
   //  set default gprs username
@@ -498,7 +535,7 @@ void init_eeprom_memory()
   //EEPROM.write(536+i, '\0');
   
   //
-  //  set default gprs password
+  //  set default gprs/wifi password
   //
   
   EEPROM.write(170, 'p');
@@ -548,8 +585,9 @@ void init_eeprom_memory()
   //	be changed on the console with f= frequency command.
   //
 
+#ifndef WIFI_NOT_CELL
   Serial1.println(F("AT+SBAND=7"));
-  
+#endif  
 
   //
   //  Do this last to show EEPROM set
@@ -776,7 +814,12 @@ void setup()
 
   bmp_setup();
   gps_setup();
+  #ifdef WIFI_NOT_CELL
+  wifi_on_home_network = false;
+  #else
   gprs_setup();
+  #endif
+  latest_message_to_send = "";
   
   //
   //  Setup main serial port for local data monitoring
@@ -857,17 +900,93 @@ void bmp_read()
 {
 
   //
+  //	On some boards we very occasionally get an odd reading, so this
+  //	history, average thing is just there to get rid of outliers
+  //
+  
+  float average = 0.0;
+  handy = 0;  
+
+  //
   //	Seems more accurate of you read temperature first
   //
 
+  //temperature = (1.8 * bmp.readTemperature()) + 32 - 5.6;
+  //pressure = bmp.readPressure() * 0.000295300;
 
-  temperature = (1.8 * bmp.readTemperature()) + 32 - 5.6;
-  pressure = bmp.readPressure() * 0.000295300;
-  
-  for(i = 0; i < 10; i++)
+  for(i =0; i < BARO_HISTORY_LENGTH - 1 ; i++)
   {
-    pressure = bmp.readPressure() * 0.000295300;
-    debug_info("p read: ", pressure);
+    if(temperature_history[i] > 1)
+    {
+      average += temperature_history[i];
+      handy ++;
+    }
+    temperature_history[i] = temperature_history[i+1];
+  }
+  temperature_history[BARO_HISTORY_LENGTH - 1] = (1.8 * bmp.readTemperature()) + 32 - 5.6;
+
+  if(handy > 0)
+  {
+    average = average / ((float) handy);
+    float closest = abs(temperature_history[BARO_HISTORY_LENGTH - 1] - average);
+    temperature = temperature_history[BARO_HISTORY_LENGTH - 1];
+    #ifdef BARO_DEBUG_ON
+    debug_info("Pressure " + String(BARO_HISTORY_LENGTH) + ": ", temperature_history[BARO_HISTORY_LENGTH - 1]);
+    #endif
+    for(int_one = BARO_HISTORY_LENGTH - 2; int_one >= 0; int_one--)
+    {
+      #ifdef BARO_DEBUG_ON
+      debug_info("Pressure " + String(int_one) + ": ", temperature_history[int_one]);
+      #endif
+      if(abs(temperature_history[int_one] - average) < closest)
+      {
+        closest = abs(temperature_history[int_one] - average);
+        temperature = temperature_history[int_one];
+      }
+    }
+  }
+  else
+  {
+    temperature = temperature_history[BARO_HISTORY_LENGTH - 1];
+  }
+
+
+
+
+  for(i =0; i < BARO_HISTORY_LENGTH - 1 ; i++)
+  {
+    if(pressure_history[i] > 1)
+    {
+      average += pressure_history[i];
+      handy ++;
+    }
+    pressure_history[i] = pressure_history[i+1];
+  }
+  pressure_history[BARO_HISTORY_LENGTH - 1] = bmp.readPressure() * 0.000295300;
+
+  if(handy > 0)
+  {
+    average = average / ((float) handy);
+    float closest = abs(pressure_history[BARO_HISTORY_LENGTH - 1] - average);
+    pressure = pressure_history[BARO_HISTORY_LENGTH - 1];
+    #ifdef BARO_DEBUG_ON
+    debug_info("Pressure " + String(BARO_HISTORY_LENGTH) + ": ", pressure_history[BARO_HISTORY_LENGTH - 1]);
+    #endif
+    for(int_one = BARO_HISTORY_LENGTH - 2; int_one >= 0; int_one--)
+    {
+      #ifdef BARO_DEBUG_ON
+      debug_info("Pressure " + String(int_one) + ": ", pressure_history[int_one]);
+      #endif
+      if(abs(pressure_history[int_one] - average) < closest)
+      {
+        closest = abs(pressure_history[int_one] - average);
+        pressure = pressure_history[int_one];
+      }
+    }
+  }
+  else
+  {
+    pressure = pressure_history[BARO_HISTORY_LENGTH - 1];
   }
   
 }
@@ -877,48 +996,48 @@ void parse_gps_buffer_as_rmc()
 {
 
   int time_start = 6;
-  int time_break = gps_parse_buffer.indexOf('.', time_start + 1);
-  int status_start = gps_parse_buffer.indexOf(',', time_start + 1);
-  int lat_start =  gps_parse_buffer.indexOf(',', status_start + 1);
-  int nors_start =  gps_parse_buffer.indexOf(',', lat_start + 1);
-  int lon_start =  gps_parse_buffer.indexOf(',', nors_start + 1);
-  int wore_start = gps_parse_buffer.indexOf(',', lon_start + 1);
-  int sog_start = gps_parse_buffer.indexOf(',', wore_start + 1);
-  int tmg_start = gps_parse_buffer.indexOf(',', sog_start + 1); 
-  int date_start = gps_parse_buffer.indexOf(',', tmg_start + 1);
-  int var_start =  gps_parse_buffer.indexOf(',', date_start + 1);
+  int time_break = gps_read_buffer.indexOf('.', time_start + 1);
+  int status_start = gps_read_buffer.indexOf(',', time_start + 1);
+  int lat_start =  gps_read_buffer.indexOf(',', status_start + 1);
+  int nors_start =  gps_read_buffer.indexOf(',', lat_start + 1);
+  int lon_start =  gps_read_buffer.indexOf(',', nors_start + 1);
+  int wore_start = gps_read_buffer.indexOf(',', lon_start + 1);
+  int sog_start = gps_read_buffer.indexOf(',', wore_start + 1);
+  int tmg_start = gps_read_buffer.indexOf(',', sog_start + 1); 
+  int date_start = gps_read_buffer.indexOf(',', tmg_start + 1);
+  int var_start =  gps_read_buffer.indexOf(',', date_start + 1);
   
-  if( time_start < 0    ||    time_start >= (int) gps_parse_buffer.length()    ||
-      time_break < 0    ||    time_break >= (int) gps_parse_buffer.length()    ||
-      status_start < 0  ||    status_start >= (int) gps_parse_buffer.length()  ||
-      lat_start < 0     ||    lat_start >= (int) gps_parse_buffer.length()     ||
-      nors_start < 0    ||    nors_start >= (int) gps_parse_buffer.length()    ||
-      lon_start < 0     ||    lon_start >= (int) gps_parse_buffer.length()     ||
-      wore_start < 0    ||    wore_start >= (int) gps_parse_buffer.length()    ||
-      sog_start < 0     ||    sog_start >= (int) gps_parse_buffer.length()     ||
-      tmg_start < 0     ||    tmg_start >= (int) gps_parse_buffer.length()     ||
-      date_start < 0    ||    date_start >= (int) gps_parse_buffer.length()    ||
-      var_start < 0     ||    var_start >= (int) gps_parse_buffer.length()     )
+  if( time_start < 0    ||    time_start >= (int) gps_read_buffer.length()    ||
+      time_break < 0    ||    time_break >= (int) gps_read_buffer.length()    ||
+      status_start < 0  ||    status_start >= (int) gps_read_buffer.length()  ||
+      lat_start < 0     ||    lat_start >= (int) gps_read_buffer.length()     ||
+      nors_start < 0    ||    nors_start >= (int) gps_read_buffer.length()    ||
+      lon_start < 0     ||    lon_start >= (int) gps_read_buffer.length()     ||
+      wore_start < 0    ||    wore_start >= (int) gps_read_buffer.length()    ||
+      sog_start < 0     ||    sog_start >= (int) gps_read_buffer.length()     ||
+      tmg_start < 0     ||    tmg_start >= (int) gps_read_buffer.length()     ||
+      date_start < 0    ||    date_start >= (int) gps_read_buffer.length()    ||
+      var_start < 0     ||    var_start >= (int) gps_read_buffer.length()     )
   {
       #ifdef GPS_DEBUG_ON
       debug_info("Bad RMC string");
-      debug_info(gps_parse_buffer);
+      debug_info(gps_read_buffer);
       #endif
       return;
   }
       
      
   
-  String is_valid = gps_parse_buffer.substring(status_start + 1, lat_start);
+  String is_valid = gps_read_buffer.substring(status_start + 1, lat_start);
   
   /*
     Break GPS time/date into integer parts
   */
 
-  gps_utc  = gps_parse_buffer.substring(time_start + 1, time_break);
-  gps_utc += gps_parse_buffer.substring(date_start + 1, var_start - 2);
+  gps_utc  = gps_read_buffer.substring(time_start + 1, time_break);
+  gps_utc += gps_read_buffer.substring(date_start + 1, var_start - 2);
   gps_utc += "20";
-  gps_utc += gps_parse_buffer.substring(var_start - 2, var_start);
+  gps_utc += gps_read_buffer.substring(var_start - 2, var_start);
 
   memset(temp_string, 0, 20 * sizeof(char));
   gps_utc.substring(0,2).toCharArray(temp_string, 3);
@@ -979,8 +1098,8 @@ void parse_gps_buffer_as_rmc()
 
   if(gps_valid)
   {
-    gps_sog  = gps_parse_buffer.substring(sog_start + 1, tmg_start);
-    gps_bearing_true  = gps_parse_buffer.substring(tmg_start + 1, date_start);
+    gps_sog  = gps_read_buffer.substring(sog_start + 1, tmg_start);
+    gps_bearing_true  = gps_read_buffer.substring(tmg_start + 1, date_start);
  
     memset(temp_string, 0, 20 * sizeof(char));
     gps_latitude.substring(0,2).toCharArray(temp_string, 3);
@@ -1057,56 +1176,56 @@ void parse_gps_buffer_as_gga()
 {
 
   int time_start = 6;
-  int lat_start =  gps_parse_buffer.indexOf(',', time_start + 1);
-  int nors_start =  gps_parse_buffer.indexOf(',', lat_start + 1);
-  int lon_start =  gps_parse_buffer.indexOf(',', nors_start + 1);
-  int wore_start = gps_parse_buffer.indexOf(',', lon_start + 1);
-  int qual_start = gps_parse_buffer.indexOf(',', wore_start + 1);
-  int siv_start = gps_parse_buffer.indexOf(',', qual_start + 1); 
-  int hdp_start = gps_parse_buffer.indexOf(',', siv_start + 1);
-  int alt_start =  gps_parse_buffer.indexOf(',', hdp_start + 1);
-  int altu_start = gps_parse_buffer.indexOf(',', alt_start + 1);
+  int lat_start =  gps_read_buffer.indexOf(',', time_start + 1);
+  int nors_start =  gps_read_buffer.indexOf(',', lat_start + 1);
+  int lon_start =  gps_read_buffer.indexOf(',', nors_start + 1);
+  int wore_start = gps_read_buffer.indexOf(',', lon_start + 1);
+  int qual_start = gps_read_buffer.indexOf(',', wore_start + 1);
+  int siv_start = gps_read_buffer.indexOf(',', qual_start + 1); 
+  int hdp_start = gps_read_buffer.indexOf(',', siv_start + 1);
+  int alt_start =  gps_read_buffer.indexOf(',', hdp_start + 1);
+  int altu_start = gps_read_buffer.indexOf(',', alt_start + 1);
      
-  if( time_start < 0 ||   time_start >= (int) gps_parse_buffer.length()   ||
-      lat_start < 0  ||   lat_start >= (int) gps_parse_buffer.length()    ||
-      nors_start < 0 ||   nors_start >= (int) gps_parse_buffer.length()   ||
-      lon_start < 0  ||   lon_start >= (int) gps_parse_buffer.length()    ||
-      wore_start < 0 ||   wore_start >= (int) gps_parse_buffer.length()   ||
-      qual_start < 0 ||   qual_start >= (int) gps_parse_buffer.length()   ||
-      siv_start < 0  ||   siv_start >= (int) gps_parse_buffer.length()    ||
-      hdp_start < 0  ||   hdp_start >= (int) gps_parse_buffer.length()    ||
-      alt_start < 0  ||   alt_start >= (int) gps_parse_buffer.length()    ||
-      altu_start < 0 ||   altu_start >= (int) gps_parse_buffer.length())
+  if( time_start < 0 ||   time_start >= (int) gps_read_buffer.length()   ||
+      lat_start < 0  ||   lat_start >= (int) gps_read_buffer.length()    ||
+      nors_start < 0 ||   nors_start >= (int) gps_read_buffer.length()   ||
+      lon_start < 0  ||   lon_start >= (int) gps_read_buffer.length()    ||
+      wore_start < 0 ||   wore_start >= (int) gps_read_buffer.length()   ||
+      qual_start < 0 ||   qual_start >= (int) gps_read_buffer.length()   ||
+      siv_start < 0  ||   siv_start >= (int) gps_read_buffer.length()    ||
+      hdp_start < 0  ||   hdp_start >= (int) gps_read_buffer.length()    ||
+      alt_start < 0  ||   alt_start >= (int) gps_read_buffer.length()    ||
+      altu_start < 0 ||   altu_start >= (int) gps_read_buffer.length())
   {
       #ifdef GPS_DEBUG_ON
       debug_info("Bad GGA string");
-      debug_info(gps_parse_buffer);
+      debug_info(gps_read_buffer);
       #endif
       return;
   }
       
     
-  gps_latitude  = gps_parse_buffer.substring(lat_start + 1, lat_start + 3);
+  gps_latitude  = gps_read_buffer.substring(lat_start + 1, lat_start + 3);
   gps_latitude += " ";
-  gps_latitude += gps_parse_buffer.substring(lat_start + 3, nors_start);
+  gps_latitude += gps_read_buffer.substring(lat_start + 3, nors_start);
   while(gps_latitude.length() < 11)
   {
     gps_latitude += "0";
   }
-  gps_latitude += gps_parse_buffer.substring(nors_start + 1, lon_start);
+  gps_latitude += gps_read_buffer.substring(nors_start + 1, lon_start);
     
-  gps_longitude  = gps_parse_buffer.substring(lon_start + 1, lon_start + 4);
+  gps_longitude  = gps_read_buffer.substring(lon_start + 1, lon_start + 4);
   gps_longitude += " ";
-  gps_longitude += gps_parse_buffer.substring(lon_start + 4, wore_start);
+  gps_longitude += gps_read_buffer.substring(lon_start + 4, wore_start);
   while(gps_longitude.length() < 12)
   {
     gps_longitude += "0";
   }
-  gps_longitude += gps_parse_buffer.substring(wore_start + 1, qual_start);
+  gps_longitude += gps_read_buffer.substring(wore_start + 1, qual_start);
   
-  gps_siv  = gps_parse_buffer.substring(siv_start + 1, hdp_start);
-  gps_hdp  = gps_parse_buffer.substring(hdp_start + 1, alt_start);
-  gps_altitude  = gps_parse_buffer.substring(alt_start + 1, altu_start);
+  gps_siv  = gps_read_buffer.substring(siv_start + 1, hdp_start);
+  gps_hdp  = gps_read_buffer.substring(hdp_start + 1, alt_start);
+  gps_altitude  = gps_read_buffer.substring(alt_start + 1, altu_start);
   
   //
   //	Extra error checking here to make sure things are valid
@@ -1122,58 +1241,38 @@ void parse_gps_buffer_as_gga()
 
 void gps_read()
 {
-
-  bool new_data = false;
   while(Serial3.available() && (int) gps_read_buffer.length() < MAX_GPS_BUFFER)
   {
-     byte_zero = Serial3.read();
-     if(byte_zero > 31 && byte_zero < 127)
+     int incoming_byte = Serial3.read();
+     if(incoming_byte == '\n')
      {
-       gps_read_buffer += String((char) byte_zero);
-       new_data = true;
+       if(gps_read_buffer.indexOf("$GPRMC,") == 0)
+       {
+         #ifdef GPS_DEBUG_ON
+         debug_info("--GPS BUF RMC--");
+         debug_info(gps_read_buffer);
+         #endif
+         parse_gps_buffer_as_rmc();
+       }
+       else if(gps_read_buffer.indexOf("$GPGGA,") == 0)
+       {
+         #ifdef GPS_DEBUG_ON
+         debug_info("--GPS BUF GGA--");
+         debug_info(gps_read_buffer);
+         #endif
+         parse_gps_buffer_as_gga();
+       }
+       gps_read_buffer = "";
+     }
+     else if (incoming_byte == '\r')
+     {
+       // don't do anything
+     }
+     else
+     {
+       gps_read_buffer += String((char) incoming_byte);
      }
   }
-  
-  int asterix_cut_point = gps_read_buffer.indexOf('*');
-
-  if(gps_read_buffer.length() > 0)
-  {
-
-    #ifdef GPS_DEBUG_ON
-    debug_info("---- GPS BUF----");
-    debug_info(gps_read_buffer);
-    #endif
-  }
-  
-  if(asterix_cut_point > -1)
-  {
-    int rmc_cut_point = gps_read_buffer.indexOf("$GPRMC,");
-    int gga_cut_point = gps_read_buffer.indexOf("$GPGGA,");
-
-    if(rmc_cut_point > -1 && rmc_cut_point < asterix_cut_point && (gga_cut_point > asterix_cut_point || gga_cut_point < 0))
-    {
-      gps_parse_buffer = gps_read_buffer.substring(rmc_cut_point, asterix_cut_point + 1);
-      gps_read_buffer = gps_read_buffer.substring(min(asterix_cut_point + 3, (int) gps_read_buffer.length()), gps_read_buffer.length());
-      parse_gps_buffer_as_rmc();
-      gps_parse_buffer = "";
-    }
-    else if(gga_cut_point > -1 && gga_cut_point < asterix_cut_point && (rmc_cut_point > asterix_cut_point || rmc_cut_point < 0))
-    {
-      gps_parse_buffer = gps_read_buffer.substring(gga_cut_point, asterix_cut_point + 1);
-      gps_read_buffer = gps_read_buffer.substring(min(asterix_cut_point + 3, (int) gps_read_buffer.length()), gps_read_buffer.length());
-      parse_gps_buffer_as_gga();
-      gps_parse_buffer = "";
-    }
-    else
-    {
-      gps_read_buffer = gps_read_buffer.substring(min(asterix_cut_point + 3, (int) gps_read_buffer.length()), gps_read_buffer.length());
-    }
-  }
-
-  //
-  //  Out of sync? Garbled? Throw it out, start again
-  //
-  
   if((int) gps_read_buffer.length() >= MAX_GPS_BUFFER - 1 )
   {
     gps_read_buffer = "";
@@ -1191,6 +1290,29 @@ void voltage_read()
   charger_three	= analogRead(4) / 37.213;
 }
 
+void append_formatted_value(String &the_string, int value)
+{
+  if(value < 10)
+  {
+    the_string += "0";
+    the_string += value;
+  }
+  else
+  {
+    the_string += value;
+  }
+}
+
+void add_timestamp_to_string(String &the_string)
+{
+  the_string += ",U:";
+  append_formatted_value(the_string, hour());
+  append_formatted_value(the_string, minute());
+  append_formatted_value(the_string, second());
+  append_formatted_value(the_string, day());
+  append_formatted_value(the_string, month());
+  the_string += year();          
+}
 
 void individual_pump_read(int pump_number, pump_state &state, int analog_input)
 {
@@ -1213,8 +1335,7 @@ void individual_pump_read(int pump_number, pump_state &state, int analog_input)
        new_message += "$";
        if(gps_valid || timeStatus() != timeNotSet)
        {
-         new_message += ",U:";
-         new_message += gps_utc;          
+         add_timestamp_to_string(new_message);
        }
        new_message += ",P";
        new_message += pump_number;
@@ -1244,8 +1365,7 @@ void individual_pump_read(int pump_number, pump_state &state, int analog_input)
 
        if(gps_valid|| timeStatus() != timeNotSet)
        {
-         new_message += ",U:";
-         new_message += gps_utc;          
+         add_timestamp_to_string(new_message);
        }
        new_message += ",P";
        new_message += pump_number;
@@ -1298,8 +1418,9 @@ void report_state(bool console_only)
   new_message += "$";
   if(gps_valid == true || timeStatus() != timeNotSet )
   {
-     new_message += ",U:";
-     new_message += gps_utc;
+     add_timestamp_to_string(new_message);
+     //new_message += ",U:";
+     //new_message += gps_utc;
   }
   
   new_message += ",T:";
@@ -1308,7 +1429,7 @@ void report_state(bool console_only)
   new_message += ",P:";
   append_float_to_string(new_message, pressure);
 
-  if(gps_valid == true)
+  if(gps_valid == true && gps_altitude.length() > 0)
   {
     new_message += ",L:";
     new_message += gps_latitude;
@@ -2209,6 +2330,199 @@ void slide_memory(unsigned int start, unsigned int how_many, unsigned int what_w
   }
 }
 
+#ifdef WIFI_NOT_CELL
+
+void wifi_read()
+{
+  #ifdef WIFI_DEBUG_ON
+  debug_info("Entering wifi_read()");
+  #endif
+  if(WiFi.status() != WL_CONNECTED)
+  {
+    wifi_communication_state = idle;
+    #ifdef WIFI_DEBUG_ON
+    debug_info("Exiting wifi_read()");
+    #endif
+    return;
+  }
+  
+  if(wifi_communication_state == idle)
+  {
+    if(latest_message_to_send.length() > 0)
+    {
+      float_hub_server.toCharArray(temp_string_a, 40);
+
+      if (wifi_client.connect(temp_string_a, float_hub_server_port)) 
+      {
+        for(i = 0; i < latest_message_to_send.length() ; i++)
+        {
+            wifi_client.write(latest_message_to_send.charAt(i));
+        }
+        wifi_client.write('\r');
+        wifi_client.write('\n');
+        wifi_communication_state = waiting_for_response;
+        wifi_read_buffer = "";
+      }
+      else
+      {
+        wifi_client.stop();
+      }
+    }
+  }
+  else if(wifi_communication_state == waiting_for_response)
+  {
+    while (wifi_client.available())
+    {
+      wifi_read_buffer += (char) wifi_client.read();
+    }
+    if(wifi_read_buffer.indexOf("$FHR$ OK") > -1)
+    {
+      pop_off_message_queue();
+      if(latest_message_to_send.length() > 0)
+      {
+        for(i = 0; i < latest_message_to_send.length() ; i++)
+        {
+            wifi_client.write(latest_message_to_send.charAt(i));
+        }
+        wifi_client.write('\r');
+        wifi_client.write('\n');
+        wifi_communication_state = waiting_for_response;
+        wifi_read_buffer = "";
+      }
+      else
+      {
+        wifi_client.stop();
+        wifi_client.flush();
+        wifi_client.stop();
+        wifi_client.stop();
+        wifi_communication_state = idle;
+      }
+    }
+  }    
+  #ifdef WIFI_DEBUG_ON
+  debug_info("Leaving wifi_read()");
+  #endif
+}
+
+void hop_on_home_network(int encryption_type)
+{
+  wifi_on_home_network = false;
+  gprs_apn.toCharArray(temp_string_a, 40);
+  gprs_password.toCharArray(temp_string_b, 40);
+  if(encryption_type == 5)
+  {
+    if(WiFi.begin(temp_string_a, 1, temp_string_b) == WL_CONNECTED)
+    {
+      #ifdef WIFI_DEBUG_ON
+      debug_info("WiFi home net wep");
+      #endif
+      wifi_on_home_network = true;
+    }
+    else
+    {
+      #ifdef WIFI_DEBUG_ON
+      debug_info("WiFi home net wep error");
+      #endif
+    }        
+  }
+  else
+  {      
+    if(WiFi.begin(temp_string_a, temp_string_b) == WL_CONNECTED)
+    {
+      #ifdef WIFI_DEBUG_ON
+      debug_info("WiFi home net");
+      #endif
+      wifi_on_home_network = true;
+    }
+    else
+    {
+      #ifdef WIFI_DEBUG_ON
+      debug_info("WiFi home net error");
+      #endif
+    }
+  }
+}
+
+void wifi_scan()
+{
+  
+  //
+  //  We always scan for networks unless we are already attached to our
+  //  preferred network, favouring our set network but using any open one we
+  //  can find as well
+  //
+  
+  if(WiFi.status() == WL_CONNECTED && wifi_on_home_network)
+  {
+    return;
+  }
+
+  wifi_on_home_network = false;
+  boolean see_home_network = false;
+  boolean see_open_network = false;
+ 
+  byte home_encryption_type = 0;
+  String open_network_name;
+
+  byte numb_networks = WiFi.scanNetworks();
+  for (int i = 0; i < numb_networks; i++)
+  {
+    if(gprs_apn.equals(WiFi.SSID(i)))
+    {
+        home_encryption_type = WiFi.encryptionType(i);
+        see_home_network = true;
+    }
+    if(WiFi.encryptionType(i) == 7)
+    {
+      see_open_network = true;
+      open_network_name = WiFi.SSID(i);
+    }    
+  }
+
+  if(WiFi.status() != WL_CONNECTED)
+  {
+    #ifdef WIFI_DEBUG_ON
+    debug_info("No wifi connection");
+    #endif
+    if(see_home_network)
+    {
+      hop_on_home_network(home_encryption_type);
+    }
+    else if(see_open_network)
+    {
+      open_network_name.toCharArray(temp_string_a, 40);
+      if(WiFi.begin(temp_string_a) == WL_CONNECTED)
+      {
+        #ifdef WIFI_DEBUG_ON
+        debug_info("wifi open net");
+        #endif
+      }
+      else
+      {
+        #ifdef WIFI_DEBUG_ON
+        debug_info("wifi open net error");
+        #endif
+      }
+    }
+  }
+  else
+  {
+    //
+    //  We are connected, but if not to home and we can see home, we want to connect to that
+    //
+
+    if(!String(WiFi.SSID()).startsWith(gprs_apn) && see_home_network)
+    {
+      WiFi.disconnect();
+      hop_on_home_network(home_encryption_type);
+    }
+  }
+}
+
+
+
+#else
+
 void gprs_read()
 {
   if(gprs_communications_on == false)
@@ -2407,6 +2721,7 @@ void gprs_read()
     gprs_watchdog_timestamp = current_timestamp;
   }
 }
+#endif 
 
 void console_read()
 {
@@ -2472,6 +2787,7 @@ void console_read()
       help_info("  ");
     }
     */
+    #ifndef WIFI_NOT_CELL
     else if(console_buffer.charAt(0) == 'b')
     {
       //help_info("GPRS on");
@@ -2484,6 +2800,7 @@ void console_read()
       gprs_communication_state = idle;
       gprs_watchdog_timestamp = millis();
     }
+    #endif
     else if(console_buffer.charAt(0) == 'v')
     {
       display_current_variables();
@@ -2497,10 +2814,12 @@ void console_read()
         help_info("Doing factory reset ...");
         init_eeprom_memory();
         read_eeprom_memory();
+        #ifndef WIFI_NOT_CELL
         Serial1.println(F("AT+CFUN=0,1"));
         gprs_connection_state = waiting_for_sind;
         gprs_communication_state = idle;
         gprs_watchdog_timestamp = millis();
+        #endif
       }
       else if(console_buffer.startsWith("s=") && console_buffer.length() > 2)
       {
@@ -2822,6 +3141,32 @@ void update_leds()
     digitalWrite(YELLOW_LED, LOW);
   }
 
+  #ifdef WIFI_NOT_CELL
+  if(WiFi.status() == WL_CONNECTED)
+  {
+    if(wifi_communication_state == idle)
+    {
+      digitalWrite(GREEN_LED, HIGH);
+    }
+    else
+    {
+      if(green_led_state == true)
+      {
+        digitalWrite(GREEN_LED, LOW);
+        green_led_state = false;
+      }
+      else
+      {
+        digitalWrite(GREEN_LED, HIGH);
+        green_led_state = true;
+      }
+    }
+  }
+  else
+  {
+    digitalWrite(GREEN_LED, LOW);
+  }
+  #else
   if(gprs_communications_on == false)
   {
     digitalWrite(GREEN_LED, LOW);
@@ -2856,6 +3201,7 @@ void update_leds()
   {
     digitalWrite(GREEN_LED, LOW);
   }
+  #endif
 }
 
 
@@ -3020,7 +3366,7 @@ void encode_latest_message_to_send()
   }
 
   //
-  //  Copy current gprs message to plain
+  //  Copy current message to plain
   //
     
   for(i = 0; i < latest_message_to_send.length(); i++)
@@ -3113,7 +3459,7 @@ void loop()
       Obviously this is main execution loop. There are a number of values we read and actions we take base on timing
   */
    
-  unsigned long current_timestamp = millis() + idle_reporting_interval;
+  unsigned long current_timestamp = millis();
  
   if(current_timestamp - sensor_previous_timestamp >  sensor_sample_interval)
   {
@@ -3139,11 +3485,29 @@ void loop()
     pump_read();
   } 
 
+  #ifdef WIFI_NOT_CELL
+
+  if(current_timestamp - wifi_scan_previous_timestamp >  wifi_scan_interval)
+  {
+    wifi_scan_previous_timestamp = current_timestamp;
+    wifi_scan();
+  }
+  
+  if(current_timestamp - wifi_read_previous_timestamp >  wifi_read_interval)
+  {
+    wifi_read_previous_timestamp = current_timestamp;
+    wifi_read();
+  }
+  
+  #else
+  
   if(current_timestamp - gprs_previous_timestamp > gprs_interval)
   {
     gprs_previous_timestamp = current_timestamp;
     gprs_read();
   }
+
+  #endif
   
   if(current_timestamp - console_previous_timestamp > console_interval)
   {
