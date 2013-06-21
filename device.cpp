@@ -49,7 +49,7 @@
 */
 
 #define   WIFI_NOT_CELL
-//#define WIFI_DEBUG_ON
+#define WIFI_DEBUG_ON
 //#define GPRS_DEBUG_ON
 //#define GPS_DEBUG_ON
 //#define PUMP_DEBUG_ON
@@ -168,28 +168,28 @@ unsigned int i;
   Toggleable flag for if we are trying to communicate
 */
 
-bool gprs_communications_on = true;
+bool gprs_or_wifi_communications_on = true;
 
 /*
     Overall timing parameters
 */
 
-unsigned long sensor_sample_interval = 10000;     //  Check temperature, pressure, every 10 seconds
-unsigned long gps_interval = 50;                  //  Read GPS serial every 1/20 second
-unsigned long voltage_interval = 5000;            //  Check batteries/chargers every 5 second
-unsigned long gprs_interval = 500;                //  Check GPRS every 500 milliseconds
-unsigned long pump_interval = 1200;               //  Check pump state every 1.2 seconds
-unsigned long active_reporting_interval = 30000;  //  When in use, report data every 30 seconds
-unsigned long idle_reporting_interval = 600000;   //  When idle, report data every 10 minutes
-unsigned long console_reporting_interval = 5000;  //  Report to USB console every 5 seconds  
-unsigned long console_interval = 500;             //  Check console for input every 400 milliseconds
-unsigned long gprs_watchdog_interval = 90000;     //  Reboot the GPRS module after 90 seconds of no progress
-unsigned long wifi_scan_interval = 30000;         //  How often to look for wifi networks
-unsigned long wifi_read_interval = 500;           //  Do wifi i/o communications twice a second
-unsigned long led_update_interval = 200;          //  Update the LED's every 200 miliseconds
-unsigned long nmea_update_interval = 100;         //  Update NMEA in serial line every 1/10 of a second
-boolean green_led_state = false;         	  //  For cycling on and off  
-unsigned long hardware_watchdog_interval = 60000; //  Do a hardware reset if we don't pat the dog every 60 seconds
+unsigned long sensor_sample_interval = 10000;     	//  Check temperature, pressure, every 10 seconds
+unsigned long gps_interval = 50;                  	//  Read GPS serial every 1/20 second
+unsigned long voltage_interval = 5000;            	//  Check batteries/chargers every 5 second
+unsigned long gprs_interval = 500;                	//  Check GPRS every 500 milliseconds
+unsigned long pump_interval = 1200;               	//  Check pump state every 1.2 seconds
+unsigned long active_reporting_interval = 30000;  	//  When in use, report data every 30 seconds
+unsigned long idle_reporting_interval = 600000;   	//  When idle, report data every 10 minutes
+unsigned long console_reporting_interval = 5000;  	//  Report to USB console every 5 seconds  
+unsigned long console_interval = 500;             	//  Check console for input every 400 milliseconds
+unsigned long gprs_or_wifi_watchdog_interval = 90000;  	//  Reboot the GPRS module after 90 seconds of no progress
+unsigned long wifi_scan_interval = 30000;         	//  How often to look for wifi networks
+unsigned long wifi_read_interval = 500;           	//  Do wifi i/o communications twice a second
+unsigned long led_update_interval = 200;          	//  Update the LED's every 200 miliseconds
+unsigned long nmea_update_interval = 100;         	//  Update NMEA in serial line every 1/10 of a second
+boolean green_led_state = false;         	  	//  For cycling on and off  
+unsigned long hardware_watchdog_interval = 60000; 	//  Do a hardware reset if we don't pat the dog every 60 seconds
   
 unsigned long sensor_previous_timestamp = 0;
 unsigned long gps_previous_timestamp = 0;
@@ -216,7 +216,7 @@ bool currently_active = true;
   GPRS flags that describe current state of communication
 */
   
-long gprs_watchdog_timestamp = 0;
+long gprs_or_wifi_watchdog_timestamp = 0;
 #define	MAX_GPRS_READ_BUFFER	64
 
 #ifdef WIFI_NOT_CELL
@@ -302,8 +302,10 @@ String         gps_altitude = "";     //  We should be able to build a tide tabl
   We keep a running average of position to do a little pythagorean calculation to tell if we're moving or not
 */
 
-float           latitude_history[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
-float          longitude_history[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
+#define LOCATION_HISTORY_LENGTH 5
+
+float           latitude_history[LOCATION_HISTORY_LENGTH];
+float          longitude_history[LOCATION_HISTORY_LENGTH];
 
 /*
   Global variables for battery banks/chargers/pumps
@@ -406,7 +408,6 @@ void gprs_setup()
   Serial1.begin(9600);
   gprs_connection_state = waiting_for_sind;
   gprs_communication_state = idle;
-  gprs_watchdog_timestamp = millis();
 }
 #endif
 
@@ -814,6 +815,7 @@ void setup()
 
   bmp_setup();
   gps_setup();
+  gprs_or_wifi_watchdog_timestamp = millis();
   #ifdef WIFI_NOT_CELL
   wifi_on_home_network = false;
   #else
@@ -840,6 +842,16 @@ void setup()
   //
   
   randomSeed(analogRead(0));
+  
+  //
+  //	We have no location history
+  //
+  
+  for(i = 0; i < LOCATION_HISTORY_LENGTH; i++)
+  {
+    latitude_history[i] = 0.0;
+    longitude_history[i] = 0.0;
+  } 
   
   //
   //  Setup LED pins, Red always on to show power
@@ -1128,14 +1140,14 @@ void parse_gps_buffer_as_rmc()
     
     float average_latitude = 0.0;
     float average_longitude = 0.0;
-    for(i = 0; i < 5; i++)
+    for(i = 0; i < LOCATION_HISTORY_LENGTH; i++)
     {
       average_latitude += latitude_history[i];
       average_longitude += longitude_history[i];
     }
     
-    average_latitude = average_latitude / 5.0;
-    average_longitude = average_longitude / 5.0;
+    average_latitude = average_latitude / ((float) LOCATION_HISTORY_LENGTH);
+    average_longitude = average_longitude / ((float) LOCATION_HISTORY_LENGTH);
     
     //
     //  Find pythagorean distance from average
@@ -1157,13 +1169,13 @@ void parse_gps_buffer_as_rmc()
     //  Slide averages
     //
     
-    for(i = 0; i < 4; i++)
+    for(i = 0; i < LOCATION_HISTORY_LENGTH - 1; i++)
     {
       latitude_history[i] = latitude_history[i + 1];
       longitude_history[i] = longitude_history[i + 1];
     }
-    latitude_history[4] = current_latitude;
-    longitude_history[4] = current_longitude;
+    latitude_history[LOCATION_HISTORY_LENGTH - 1] = current_latitude;
+    longitude_history[LOCATION_HISTORY_LENGTH - 1] = current_longitude;
   }
   else  
   {    
@@ -2334,6 +2346,21 @@ void slide_memory(unsigned int start, unsigned int how_many, unsigned int what_w
 
 void wifi_read()
 {
+  if(gprs_or_wifi_communications_on == false)
+  {
+    return;
+  }
+  unsigned long current_timestamp = millis();
+  if(current_timestamp - gprs_or_wifi_watchdog_timestamp > gprs_or_wifi_watchdog_interval)
+  {
+    #ifdef WIFI_DEBUG_ON
+    debug_info("*** Reseting Wifi (Watchdog)  ***");
+    #endif
+    wifi_on_home_network = false;
+    WiFi.disconnect();
+    wifi_communication_state = idle;
+    gprs_or_wifi_watchdog_timestamp = current_timestamp;
+  }
   #ifdef WIFI_DEBUG_ON
   debug_info("Entering wifi_read()");
   #endif
@@ -2348,6 +2375,7 @@ void wifi_read()
   
   if(wifi_communication_state == idle)
   {
+    gprs_or_wifi_watchdog_timestamp = current_timestamp;
     if(latest_message_to_send.length() > 0)
     {
       float_hub_server.toCharArray(temp_string_a, 40);
@@ -2377,6 +2405,7 @@ void wifi_read()
     }
     if(wifi_read_buffer.indexOf("$FHR$ OK") > -1)
     {
+      gprs_or_wifi_watchdog_timestamp = current_timestamp;
       pop_off_message_queue();
       if(latest_message_to_send.length() > 0)
       {
@@ -2525,7 +2554,7 @@ void wifi_scan()
 
 void gprs_read()
 {
-  if(gprs_communications_on == false)
+  if(gprs_or_wifi_communications_on == false)
   {
     return;
   }
@@ -2552,12 +2581,12 @@ void gprs_read()
       Serial1.println(F("AT+CFUN=0,1"));
       gprs_connection_state = waiting_for_sind;
       gprs_communication_state = idle;
-      gprs_watchdog_timestamp = current_timestamp;
+      gprs_or_wifi_watchdog_timestamp = current_timestamp;
     }   
     else if(gprs_read_buffer.indexOf("+SIND: 4") > 0)
     {
       gprs_connection_state = waiting_for_gprs_attachment;
-      gprs_watchdog_timestamp = current_timestamp;
+      gprs_or_wifi_watchdog_timestamp = current_timestamp;
       Serial1.println(F("AT+CGATT?"));
     }
     else if(gprs_read_buffer.indexOf("+SIND:") > 0)
@@ -2571,7 +2600,7 @@ void gprs_read()
       apn_string += "\"";
       Serial1.println(apn_string);
       gprs_connection_state = waiting_for_pdp_ack;
-      gprs_watchdog_timestamp = current_timestamp;
+      gprs_or_wifi_watchdog_timestamp = current_timestamp;
     }
     else if(gprs_connection_state == waiting_for_gprs_attachment)
     {
@@ -2580,7 +2609,7 @@ void gprs_read()
     else if(gprs_connection_state == waiting_for_pdp_ack && gprs_read_buffer.indexOf("OK") > 0)
     {
       gprs_connection_state = waiting_for_pco_ack;
-      gprs_watchdog_timestamp = current_timestamp;
+      gprs_or_wifi_watchdog_timestamp = current_timestamp;
       String pco_string = "AT+CGPCO=0,\"";
       pco_string += gprs_username;
       pco_string += "\",\"";
@@ -2591,7 +2620,7 @@ void gprs_read()
     else if(gprs_connection_state == waiting_for_pco_ack && gprs_read_buffer.indexOf("OK") > 0)
     {
       gprs_connection_state = waiting_for_pdp_context_active;
-      gprs_watchdog_timestamp = current_timestamp;
+      gprs_or_wifi_watchdog_timestamp = current_timestamp;
       Serial1.println(F("AT+CGACT=1,1"));
       #ifdef GPRS_DEBUG_ON
       debug_info("Waiting on ACT=1,1...");
@@ -2608,18 +2637,18 @@ void gprs_read()
       debug_info(host_string);
       #endif
       gprs_connection_state = waiting_for_remote_host_ack;
-      gprs_watchdog_timestamp = current_timestamp;
+      gprs_or_wifi_watchdog_timestamp = current_timestamp;
     }
     else if(gprs_connection_state == waiting_for_remote_host_ack && gprs_read_buffer.indexOf("OK") > 0)
     {
       Serial1.println(F("AT+SDATARXMD=1,1"));
       gprs_connection_state =  waiting_for_string_format_ack;
-      gprs_watchdog_timestamp = current_timestamp;
+      gprs_or_wifi_watchdog_timestamp = current_timestamp;
     }
     else if(gprs_connection_state == waiting_for_string_format_ack && gprs_read_buffer.indexOf("OK") > 0)
     {
       gprs_connection_state = we_be_connected;
-      gprs_watchdog_timestamp = current_timestamp;
+      gprs_or_wifi_watchdog_timestamp = current_timestamp;
       #ifdef GPRS_DEBUG_ON
       debug_info("We got internets!");
       #endif
@@ -2634,19 +2663,19 @@ void gprs_read()
       
       if(gprs_communication_state == idle && latest_message_to_send.length() < 1)
       {
-        gprs_watchdog_timestamp = current_timestamp;
+        gprs_or_wifi_watchdog_timestamp = current_timestamp;
       }
       else if(gprs_communication_state == idle && latest_message_to_send.length() > 0)
       {
         Serial1.println(F("AT+SDATASTART=1,1"));
         gprs_communication_state = waiting_for_socket_ack;
-        gprs_watchdog_timestamp = current_timestamp;
+        gprs_or_wifi_watchdog_timestamp = current_timestamp;
       }
       else if(gprs_communication_state == waiting_for_socket_ack && gprs_read_buffer.indexOf("OK") > 0)
       {
         Serial1.println(F("AT+SDATASTATUS=1"));
         gprs_communication_state = waiting_for_socket_connection;
-        gprs_watchdog_timestamp = current_timestamp;
+        gprs_or_wifi_watchdog_timestamp = current_timestamp;
       }
       else if(gprs_communication_state == waiting_for_socket_connection)
       {
@@ -2658,7 +2687,7 @@ void gprs_read()
           Serial1.print(latest_message_to_send+"\r\n"); // Extra 2 bytes;
           Serial1.write(26); // CTRL-Z, end of packet identifier for SMB-5100
           gprs_communication_state = waiting_for_data_sent_ack;
-          gprs_watchdog_timestamp = current_timestamp;
+          gprs_or_wifi_watchdog_timestamp = current_timestamp;
         }
         else
         {
@@ -2668,7 +2697,7 @@ void gprs_read()
       else if(gprs_communication_state == waiting_for_data_sent_ack && gprs_read_buffer.indexOf("OK") > 0)
       {                
         gprs_communication_state = waiting_for_response;
-        gprs_watchdog_timestamp = current_timestamp;
+        gprs_or_wifi_watchdog_timestamp = current_timestamp;
       }
       else if(gprs_communication_state == waiting_for_response)
       {
@@ -2683,14 +2712,14 @@ void gprs_read()
             Serial1.print(latest_message_to_send+"\r\n"); // Extra 2 bytes;
             Serial1.write(26); // CTRL-Z, end of packet identifier for SMB-5100
             gprs_communication_state = waiting_for_data_sent_ack;
-            gprs_watchdog_timestamp = current_timestamp;
+            gprs_or_wifi_watchdog_timestamp = current_timestamp;
             gprs_communication_state = waiting_for_data_sent_ack;
-            gprs_watchdog_timestamp = current_timestamp;
+            gprs_or_wifi_watchdog_timestamp = current_timestamp;
           }
           else
           {
             gprs_communication_state = waiting_for_socket_close_ack;
-            gprs_watchdog_timestamp = current_timestamp;
+            gprs_or_wifi_watchdog_timestamp = current_timestamp;
             Serial1.println(F("AT+SDATASTART=1,0"));
           }
         }
@@ -2702,7 +2731,7 @@ void gprs_read()
       else if(gprs_communication_state == waiting_for_socket_close_ack && gprs_read_buffer.indexOf("OK") > 0)
       {
         gprs_communication_state = idle;
-        gprs_watchdog_timestamp = current_timestamp;
+        gprs_or_wifi_watchdog_timestamp = current_timestamp;
       }
   }
   
@@ -2710,7 +2739,7 @@ void gprs_read()
   //  Check the watchdog timer and give up all hope if it's
   //
   
-  if(current_timestamp - gprs_watchdog_timestamp > gprs_watchdog_interval)
+  if(current_timestamp - gprs_or_wifi_watchdog_timestamp > gprs_or_wifi_watchdog_interval)
   {
     #ifdef GPRS_DEBUG_ON
     debug_info("*** Rebooting GPRS (Watchdog)  ***");
@@ -2718,7 +2747,7 @@ void gprs_read()
     Serial1.println(F("AT+CFUN=0,1"));
     gprs_connection_state = waiting_for_sind;
     gprs_communication_state = idle;
-    gprs_watchdog_timestamp = current_timestamp;
+    gprs_or_wifi_watchdog_timestamp = current_timestamp;
   }
 }
 #endif 
@@ -2752,7 +2781,7 @@ void console_read()
 */
     if(console_buffer.charAt(0) == 'q')
     {
-      gprs_communications_on = false;
+      gprs_or_wifi_communications_on = false;
       //help_info("GPRS off");
     }
 
@@ -2787,20 +2816,20 @@ void console_read()
       help_info("  ");
     }
     */
-    #ifndef WIFI_NOT_CELL
     else if(console_buffer.charAt(0) == 'b')
     {
       //help_info("GPRS on");
-      gprs_communications_on = true;
+      gprs_or_wifi_communications_on = true;
+      #ifndef WIFI_NOT_CELL
       #ifdef GPRS_DEBUG_ON
       debug_info("*** Rebooting GPRS (Watchdog)  ***");
       #endif
       Serial1.println(F("AT+CFUN=0,1"));
       gprs_connection_state = waiting_for_sind;
       gprs_communication_state = idle;
-      gprs_watchdog_timestamp = millis();
+      gprs_or_wifi_watchdog_timestamp = millis();
+      #endif
     }
-    #endif
     else if(console_buffer.charAt(0) == 'v')
     {
       display_current_variables();
@@ -2818,7 +2847,7 @@ void console_read()
         Serial1.println(F("AT+CFUN=0,1"));
         gprs_connection_state = waiting_for_sind;
         gprs_communication_state = idle;
-        gprs_watchdog_timestamp = millis();
+        gprs_or_wifi_watchdog_timestamp = millis();
         #endif
       }
       else if(console_buffer.startsWith("s=") && console_buffer.length() > 2)
@@ -3141,6 +3170,12 @@ void update_leds()
     digitalWrite(YELLOW_LED, LOW);
   }
 
+  if(gprs_or_wifi_communications_on == false)
+  {
+    digitalWrite(GREEN_LED, LOW);
+    return;
+  } 
+
   #ifdef WIFI_NOT_CELL
   if(WiFi.status() == WL_CONNECTED)
   {
@@ -3167,11 +3202,6 @@ void update_leds()
     digitalWrite(GREEN_LED, LOW);
   }
   #else
-  if(gprs_communications_on == false)
-  {
-    digitalWrite(GREEN_LED, LOW);
-    return;
-  } 
 
   //
   //  Match Green to state
