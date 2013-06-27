@@ -3104,7 +3104,6 @@ void display_current_variables()
       line += "0";
     }
     line += String(float_hub_aes_key[i], HEX);
-    line += " ";
   }
   help_info(line);
   
