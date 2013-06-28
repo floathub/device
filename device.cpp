@@ -2856,7 +2856,7 @@ void console_read()
         
         for(i=2; i < console_buffer.length(); i++)
         {
-          if(console_buffer[i] < 45 ||
+          if(console_buffer[i] < 31 ||
              console_buffer[i] > 122)
           {
             help_info("Bad input");
@@ -2879,7 +2879,7 @@ void console_read()
         
         for(i=2; i < console_buffer.length(); i++)
         {
-          if(console_buffer[i] < 45 ||
+          if(console_buffer[i] < 31 ||
              console_buffer[i] > 122)
           {
             help_info("Bad input");
@@ -2902,7 +2902,7 @@ void console_read()
         
         for(i=2; i < console_buffer.length(); i++)
         {
-          if(console_buffer[i] < 45 ||
+          if(console_buffer[i] < 31 ||
              console_buffer[i] > 122)
           {
             help_info("Bad input");
@@ -2925,7 +2925,7 @@ void console_read()
         
         for(i=2; i < console_buffer.length(); i++)
         {
-          if(console_buffer[i] < 45 ||
+          if(console_buffer[i] < 31 ||
              console_buffer[i] > 122)
           {
             help_info("Bad input");
