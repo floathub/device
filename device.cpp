@@ -104,6 +104,7 @@ void slide_memory(unsigned int start, unsigned int how_many, unsigned int what_w
 void debug_info(String some_info);
 void debug_info(String some_info, float x);
 void debug_info(String some_info, int x);
+void wifi_scan(void);
 
 /*
   Define some EEPROM memory locations
@@ -182,10 +183,10 @@ unsigned long pump_interval = 1200;               	//  Check pump state every 1.
 unsigned long active_reporting_interval = 30000;  	//  When in use, report data every 30 seconds
 unsigned long idle_reporting_interval = 600000;   	//  When idle, report data every 10 minutes
 unsigned long console_reporting_interval = 5000;  	//  Report to USB console every 5 seconds  
-unsigned long console_interval = 500;             	//  Check console for input every 400 milliseconds
+unsigned long console_interval = 250;             	//  Check console for input every 250 milliseconds
 unsigned long gprs_or_wifi_watchdog_interval = 90000;  	//  Reboot the GPRS module after 90 seconds of no progress
 unsigned long wifi_scan_interval = 30000;         	//  How often to look for wifi networks
-unsigned long wifi_read_interval = 500;           	//  Do wifi i/o communications twice a second
+unsigned long wifi_read_interval = 5000;           	//  Do wifi i/o communications every 5 seconds
 unsigned long led_update_interval = 200;          	//  Update the LED's every 200 miliseconds
 unsigned long nmea_update_interval = 100;         	//  Update NMEA in serial line every 1/10 of a second
 boolean green_led_state = false;         	  	//  For cycling on and off  
@@ -281,11 +282,16 @@ float temperature_history[BARO_HISTORY_LENGTH];
   Some global variables used in parsing from the GPS module
 */
 
-#define MAX_GPS_BUFFER	 200
-#define	MAX_NMEA_BUFFER	 100
-String gps_read_buffer = "";
-String wifi_read_buffer = "";
-String nmea_read_buffer = "";
+#define	MAX_CONSOLE_BUFFER  100
+#define MAX_GPS_BUFFER	    200
+#define MAX_WIFI_BUFFER	     64
+#define	MAX_NMEA_BUFFER	    100
+
+String console_read_buffer;
+String gps_read_buffer;
+String wifi_read_buffer;
+String nmea_read_buffer;
+
 
 bool           gps_valid = false;
 String         gps_utc = "";          //  UTC time and date
@@ -812,12 +818,16 @@ void read_eeprom_memory()
 
 void setup()
 {
+  console_read_buffer.reserve(MAX_CONSOLE_BUFFER);
+  gps_read_buffer.reserve(MAX_GPS_BUFFER);
+  nmea_read_buffer.reserve(MAX_NMEA_BUFFER);
 
   bmp_setup();
   gps_setup();
   gprs_or_wifi_watchdog_timestamp = millis();
   #ifdef WIFI_NOT_CELL
   wifi_on_home_network = false;
+  wifi_read_buffer.reserve(MAX_WIFI_BUFFER);
   #else
   gprs_setup();
   #endif
@@ -1209,6 +1219,7 @@ void parse_gps_buffer_as_gga()
       alt_start < 0  ||   alt_start >= (int) gps_read_buffer.length()    ||
       altu_start < 0 ||   altu_start >= (int) gps_read_buffer.length())
   {
+      gps_valid = false;
       #ifdef GPS_DEBUG_ON
       debug_info("Bad GGA string");
       debug_info(gps_read_buffer);
@@ -1431,8 +1442,6 @@ void report_state(bool console_only)
   if(gps_valid == true || timeStatus() != timeNotSet )
   {
      add_timestamp_to_string(new_message);
-     //new_message += ",U:";
-     //new_message += gps_utc;
   }
   
   new_message += ",T:";
@@ -2281,9 +2290,10 @@ void queue_detailed_message()
   else
   {
     //
-    //  Need to store state in EEPROM if it's been an hour or there's space to do so
+    //  Need to store state in EEPROM if it's been an hour or there's space
+    //  to do so
     //  
-
+    
     if(now() - last_detailed_eeprom_write > 60 * 60 || detailed_state_count < DETAILED_STATE_NUMB_LOCATIONS)
     {
         last_detailed_eeprom_write = now();
@@ -2346,8 +2356,14 @@ void slide_memory(unsigned int start, unsigned int how_many, unsigned int what_w
 
 void wifi_read()
 {
+  #ifdef WIFI_DEBUG_ON
+  debug_info("E wifi_read()");
+  #endif
   if(gprs_or_wifi_communications_on == false)
   {
+    #ifdef WIFI_DEBUG_ON
+    debug_info("QA wifi_read()");
+    #endif
     return;
   }
   unsigned long current_timestamp = millis();
@@ -2360,22 +2376,23 @@ void wifi_read()
     WiFi.disconnect();
     wifi_communication_state = idle;
     gprs_or_wifi_watchdog_timestamp = current_timestamp;
+    wifi_scan();
+    #ifdef WIFI_DEBUG_ON
+    debug_info("QB wifi_read()");
+    #endif
+    return;
   }
-  #ifdef WIFI_DEBUG_ON
-  debug_info("Entering wifi_read()");
-  #endif
   if(WiFi.status() != WL_CONNECTED)
   {
     wifi_communication_state = idle;
     #ifdef WIFI_DEBUG_ON
-    debug_info("Exiting wifi_read()");
+    debug_info("QC wifi_read()");
     #endif
     return;
   }
   
   if(wifi_communication_state == idle)
   {
-    gprs_or_wifi_watchdog_timestamp = current_timestamp;
     if(latest_message_to_send.length() > 0)
     {
       float_hub_server.toCharArray(temp_string_a, 40);
@@ -2388,6 +2405,10 @@ void wifi_read()
         }
         wifi_client.write('\r');
         wifi_client.write('\n');
+        #ifdef WIFI_DEBUG_ON
+        debug_info("Sent via wifi: " + latest_message_to_send);
+        #endif
+        gprs_or_wifi_watchdog_timestamp = current_timestamp;
         wifi_communication_state = waiting_for_response;
         wifi_read_buffer = "";
       }
@@ -2396,10 +2417,14 @@ void wifi_read()
         wifi_client.stop();
       }
     }
+    else
+    {
+        gprs_or_wifi_watchdog_timestamp = current_timestamp;
+    }
   }
   else if(wifi_communication_state == waiting_for_response)
   {
-    while (wifi_client.available())
+    while (wifi_client.available() && wifi_read_buffer.length() < MAX_WIFI_BUFFER)
     {
       wifi_read_buffer += (char) wifi_client.read();
     }
@@ -2415,11 +2440,15 @@ void wifi_read()
         }
         wifi_client.write('\r');
         wifi_client.write('\n');
+        #ifdef WIFI_DEBUG_ON
+        debug_info("Sent via wifi: " + latest_message_to_send);
+        #endif
         wifi_communication_state = waiting_for_response;
         wifi_read_buffer = "";
       }
       else
       {
+        wifi_read_buffer = "";
         wifi_client.stop();
         wifi_client.flush();
         wifi_client.stop();
@@ -2429,7 +2458,7 @@ void wifi_read()
     }
   }    
   #ifdef WIFI_DEBUG_ON
-  debug_info("Leaving wifi_read()");
+  debug_info("QD wifi_read()");
   #endif
 }
 
@@ -2523,7 +2552,7 @@ void wifi_scan()
       if(WiFi.begin(temp_string_a) == WL_CONNECTED)
       {
         #ifdef WIFI_DEBUG_ON
-        debug_info("wifi open net");
+        debug_info("wifi open net: " + open_network_name);
         #endif
       }
       else
@@ -2752,41 +2781,43 @@ void gprs_read()
 }
 #endif 
 
-void console_read()
+void parse_console()
 {
-  String console_buffer;
   String display_string;
-  while(Serial.available() && console_buffer.length() < 255)
-  {
-     console_buffer += (char) Serial.read();
-  }
-  if (console_buffer.length() > 0)
-  {
+
 /*
-    if(console_buffer.charAt(0) == 'e')
+  while(Serial.available() && console_read_buffer.length() < 255)
+  {
+     console_read_buffer += (char) Serial.read();
+  }
+  if (console_read_buffer.length() > 0)
+  {
+*/
+/*
+    if(console_read_buffer.charAt(0) == 'e')
     {
       local_console_mode = echo_mode;
       //help_info("Entering echo mode");
     }
-    else if(console_buffer.charAt(0) == 'c')
+    else if(console_read_buffer.charAt(0) == 'c')
     {
       local_console_mode = command_mode;
       //help_info("Entering command mode");
     }
-    else if(console_buffer.charAt(0) == 'd')
+    else if(console_read_buffer.charAt(0) == 'd')
     {
       local_console_mode = debug_mode;
       //help_info("Entering debug mode");
     }
 */
-    if(console_buffer.charAt(0) == 'q')
+    if(console_read_buffer.charAt(0) == 'q')
     {
       gprs_or_wifi_communications_on = false;
       //help_info("GPRS off");
     }
 
     /*
-    else if(console_buffer.charAt(0) == 'h')
+    else if(console_read_buffer.charAt(0) == 'h')
     {
       help_info("  ");
       help_info("  Main Commands");
@@ -2816,7 +2847,7 @@ void console_read()
       help_info("  ");
     }
     */
-    else if(console_buffer.charAt(0) == 'b')
+    else if(console_read_buffer.charAt(0) == 'b')
     {
       //help_info("GPRS on");
       gprs_or_wifi_communications_on = true;
@@ -2830,15 +2861,13 @@ void console_read()
       gprs_or_wifi_watchdog_timestamp = millis();
       #endif
     }
-    else if(console_buffer.charAt(0) == 'v')
+    else if(console_read_buffer.charAt(0) == 'v')
     {
       display_current_variables();
     }    
     else 
     {
-      console_buffer = console_buffer.substring(0,console_buffer.indexOf('\r'));
-      console_buffer = console_buffer.substring(0,console_buffer.indexOf('\n'));
-      if(console_buffer.startsWith("factory"))
+      if(console_read_buffer.startsWith("factory"))
       {
         help_info("Doing factory reset ...");
         init_eeprom_memory();
@@ -2850,14 +2879,14 @@ void console_read()
         gprs_or_wifi_watchdog_timestamp = millis();
         #endif
       }
-      else if(console_buffer.startsWith("s=") && console_buffer.length() > 2)
+      else if(console_read_buffer.startsWith("s=") && console_read_buffer.length() > 2)
       {
         bool bad_chars = false;
         
-        for(i=2; i < console_buffer.length(); i++)
+        for(i=2; i < console_read_buffer.length(); i++)
         {
-          if(console_buffer[i] < 31 ||
-             console_buffer[i] > 122)
+          if(console_read_buffer[i] < 31 ||
+             console_read_buffer[i] > 122)
           {
             help_info("Bad input");
             bad_chars = true;
@@ -2866,21 +2895,21 @@ void console_read()
         }
         if(!bad_chars)
         {
-          float_hub_server = console_buffer.substring(2);
+          float_hub_server = console_read_buffer.substring(2);
           write_eeprom_memory();
           display_string = "s=";
           display_string += float_hub_server;
           help_info(display_string);
         }        
       }
-      else if(console_buffer.startsWith("a=") && console_buffer.length() > 1)
+      else if(console_read_buffer.startsWith("a=") && console_read_buffer.length() > 1)
       {
         bool bad_chars = false;
         
-        for(i=2; i < console_buffer.length(); i++)
+        for(i=2; i < console_read_buffer.length(); i++)
         {
-          if(console_buffer[i] < 31 ||
-             console_buffer[i] > 122)
+          if(console_read_buffer[i] < 31 ||
+             console_read_buffer[i] > 122)
           {
             help_info("Bad input");
             bad_chars = true;
@@ -2889,21 +2918,21 @@ void console_read()
         }
         if(!bad_chars)
         {
-          gprs_apn = console_buffer.substring(2);
+          gprs_apn = console_read_buffer.substring(2);
           write_eeprom_memory();
           display_string = "a=";
           display_string += gprs_apn;
           help_info(display_string);
         }        
       }
-      else if(console_buffer.startsWith("u=") && console_buffer.length() > 1)
+      else if(console_read_buffer.startsWith("u=") && console_read_buffer.length() > 1)
       {
         bool bad_chars = false;
         
-        for(i=2; i < console_buffer.length(); i++)
+        for(i=2; i < console_read_buffer.length(); i++)
         {
-          if(console_buffer[i] < 31 ||
-             console_buffer[i] > 122)
+          if(console_read_buffer[i] < 31 ||
+             console_read_buffer[i] > 122)
           {
             help_info("Bad input");
             bad_chars = true;
@@ -2912,21 +2941,21 @@ void console_read()
         }
         if(!bad_chars)
         {
-          gprs_username = console_buffer.substring(2);
+          gprs_username = console_read_buffer.substring(2);
           write_eeprom_memory();
           display_string = "u=";
           display_string += gprs_username;
           help_info(display_string);
         }        
       }
-      else if(console_buffer.startsWith("w=") && console_buffer.length() > 1)
+      else if(console_read_buffer.startsWith("w=") && console_read_buffer.length() > 1)
       {
         bool bad_chars = false;
         
-        for(i=2; i < console_buffer.length(); i++)
+        for(i=2; i < console_read_buffer.length(); i++)
         {
-          if(console_buffer[i] < 31 ||
-             console_buffer[i] > 122)
+          if(console_read_buffer[i] < 31 ||
+             console_read_buffer[i] > 122)
           {
             help_info("Bad input");
             bad_chars = true;
@@ -2935,33 +2964,33 @@ void console_read()
         }
         if(!bad_chars)
         {
-          gprs_password = console_buffer.substring(2);
+          gprs_password = console_read_buffer.substring(2);
           write_eeprom_memory();
           display_string = "w=";
           display_string += gprs_password;
           help_info(display_string);
         }        
       }
-      else if(console_buffer.startsWith("p=") && console_buffer.length() > 2)
+      else if(console_read_buffer.startsWith("p=") && console_read_buffer.length() > 2)
       {
-          char temp_array[console_buffer.length() - 1];
+          char temp_array[console_read_buffer.length() - 1];
           
-          console_buffer.substring(2).toCharArray(temp_array, console_buffer.length() - 1);
+          console_read_buffer.substring(2).toCharArray(temp_array, console_read_buffer.length() - 1);
           float_hub_server_port = atoi(temp_array);
           write_eeprom_memory();
           display_string = "p=";
           display_string += float_hub_server_port;
           help_info(display_string);
       }
-      else if(console_buffer.startsWith("i=") && console_buffer.length() >= 10)
+      else if(console_read_buffer.startsWith("i=") && console_read_buffer.length() >= 10)
       {        
         
         bool bad_chars = false;
         
         for(i=0; i < 8; i++)
         {
-          if(console_buffer[i+2] < 37 ||
-             console_buffer[i+2] > 126)
+          if(console_read_buffer[i+2] < 37 ||
+             console_read_buffer[i+2] > 126)
           {
             help_info("Bad input");
             bad_chars = true;
@@ -2970,25 +2999,25 @@ void console_read()
         }
         if(!bad_chars)
         {
-          float_hub_id = console_buffer.substring(2,10);
+          float_hub_id = console_read_buffer.substring(2,10);
           write_eeprom_memory();
           display_string = "i=";
           display_string += float_hub_id;
           help_info(display_string);
         }
       }
-      else if(console_buffer.startsWith("k=") && console_buffer.length() == 34)
+      else if(console_read_buffer.startsWith("k=") && console_read_buffer.length() == 34)
       {        
         
         bool bad_chars = false;
+        console_read_buffer.toLowerCase();
         
         for(i=0; i < 32; i++)
         {
-          if(
-              console_buffer[i+2] < '0' &&
-              console_buffer[i+2] > '9' &&
-              console_buffer[i+2] < 'a' &&
-              console_buffer[i+2] > 'f' 
+          if(!((console_read_buffer[i+2] >= '0' &&
+              console_read_buffer[i+2] <= '9') ||
+              (console_read_buffer[i+2] >= 'a' &&
+              console_read_buffer[i+2] <= 'f' ))
             )          
           {
             help_info("Bad input");
@@ -3003,22 +3032,22 @@ void console_read()
           for(i = 0; i < 16; i++)
           {
             int new_value = 0;
-            if (console_buffer[2 + (i * 2)] <='9')
+            if (console_read_buffer[2 + (i * 2)] <='9')
             {
-                new_value = (console_buffer[2 + (i * 2)] - '0' ) * 16;
+                new_value = (console_read_buffer[2 + (i * 2)] - '0' ) * 16;
             }
             else
             {
-                new_value = (console_buffer[2 + (i * 2)] - 'a' + 10) * 16;
+                new_value = (console_read_buffer[2 + (i * 2)] - 'a' + 10) * 16;
             }
     
-            if (console_buffer[3 + (i * 2)] <='9')
+            if (console_read_buffer[3 + (i * 2)] <='9')
             {
-                new_value += console_buffer[3 + (i * 2)] - '0';
+                new_value += console_read_buffer[3 + (i * 2)] - '0';
             }
             else
             {
-                new_value += console_buffer[3 + (i * 2)] - 'a' + 10;
+                new_value += console_read_buffer[3 + (i * 2)] - 'a' + 10;
             }
 
             float_hub_aes_key[i] = new_value;
@@ -3033,10 +3062,10 @@ void console_read()
           help_info(display_string);
         }    
       }
-      else if(console_buffer.startsWith("f=") && console_buffer.length() > 2)
+      else if(console_read_buffer.startsWith("f=") && console_read_buffer.length() > 2)
       {
           int new_value = -1;
-          new_value = console_buffer[2];
+          new_value = console_read_buffer[2];
           if(new_value < 0 || new_value > 8)
           {
             Serial1.print(F("AT+SBAND="));
@@ -3051,7 +3080,34 @@ void console_read()
           }
       }
     }
-  }  
+}  
+
+
+void console_read()
+{
+  String display_string;
+
+  while(Serial.available() && (int) console_read_buffer.length() < MAX_CONSOLE_BUFFER)
+  {
+     int incoming_byte = Serial.read();
+     if(incoming_byte == '\n')
+     {
+       parse_console();
+       console_read_buffer = "";
+     }
+     else if (incoming_byte == '\r')
+     {
+       // don't do anything
+     }
+     else
+     {
+       console_read_buffer += String((char) incoming_byte);
+     }
+  }
+  if((int) console_read_buffer.length() >= MAX_CONSOLE_BUFFER - 1 )
+  {
+    console_read_buffer = "";
+  }
 }
 
 void display_current_variables()
@@ -3378,7 +3434,6 @@ void encode_latest_message_to_send()
     latest_message_to_send += " MEMORY STRESS TEST";
   }
   #endif
-
 
   //
   //  Take the latest message that is set up to go over GPRS and AES encode it, then Base-64 convert it
