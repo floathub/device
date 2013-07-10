@@ -502,59 +502,53 @@ void init_eeprom_memory()
   //  Set default port
   //
   
-  EEPROM.write(88, 0);
-  EEPROM.write(89, 44);
+  EEPROM.write(80, 0);
+  EEPROM.write(81, 44);
   
   //
   //  set default gprs apn / wireless network name
   //
   
-  EEPROM.write(90, 'a');
-  EEPROM.write(91, 'p');
-  EEPROM.write(92, 'n');
-  EEPROM.write(93, '.');
-  EEPROM.write(94, 'n');
-  EEPROM.write(95, 'a');
-  EEPROM.write(96, 'm');
-  EEPROM.write(97, 'e');
+  EEPROM.write(82, 'a');
+  EEPROM.write(83, 'p');
+  EEPROM.write(84, 'n');
+  EEPROM.write(85, '.');
+  EEPROM.write(86, 'n');
+  EEPROM.write(87, 'a');
+  EEPROM.write(88, 'm');
+  EEPROM.write(89, 'e');
   
-  EEPROM.write(98, '\0');
+  EEPROM.write(90, '\0');
   
   //
   //  set default gprs username
   //
   
-  EEPROM.write(130, 'u');
-  EEPROM.write(131, 's');
-  EEPROM.write(132, 'e');
-  EEPROM.write(133, 'r');
-  EEPROM.write(134, 'n');
-  EEPROM.write(135, 'a');
-  EEPROM.write(136, 'm');
-  EEPROM.write(137, 'e');
+  EEPROM.write(122, 'u');
+  EEPROM.write(123, 's');
+  EEPROM.write(124, 'e');
+  EEPROM.write(125, 'r');
+  EEPROM.write(126, 'n');
+  EEPROM.write(127, 'a');
+  EEPROM.write(128, 'm');
+  EEPROM.write(129, 'e');
 
-  EEPROM.write(138, '\0');
-  
-  //for(i = 0; i < default_gprs_username.length(); i++)
-  //{
-  //  EEPROM.write(536 + i, default_gprs_username[i]);
-  //}
-  //EEPROM.write(536+i, '\0');
+  EEPROM.write(130, '\0');
   
   //
   //  set default gprs/wifi password
   //
   
-  EEPROM.write(170, 'p');
-  EEPROM.write(171, 'a');
-  EEPROM.write(172, 's');
-  EEPROM.write(173, 's');
-  EEPROM.write(174, 'w');
-  EEPROM.write(175, 'o');
-  EEPROM.write(176, 'r');
-  EEPROM.write(177, 'd');
+  EEPROM.write(162, 'p');
+  EEPROM.write(163, 'a');
+  EEPROM.write(164, 's');
+  EEPROM.write(165, 's');
+  EEPROM.write(166, 'w');
+  EEPROM.write(167, 'o');
+  EEPROM.write(168, 'r');
+  EEPROM.write(169, 'd');
 
-  EEPROM.write(178, '\0');
+  EEPROM.write(170, '\0');
   
   
   //
@@ -626,7 +620,7 @@ void write_eeprom_memory()
   //  Store server
   //
   
-  for(i = 0; i < min(float_hub_server.length(), 69); i++)
+  for(i = 0; i < min(float_hub_server.length(), 61); i++)
   {
     EEPROM.write(18 + i, float_hub_server[i]);
   }
@@ -636,8 +630,8 @@ void write_eeprom_memory()
   //  Store port
   //
   
-  EEPROM.write(88, highByte(float_hub_server_port));
-  EEPROM.write(89, lowByte(float_hub_server_port));
+  EEPROM.write(80, highByte(float_hub_server_port));
+  EEPROM.write(81, lowByte(float_hub_server_port));
   
   //
   //  Store gprs apn
@@ -645,9 +639,9 @@ void write_eeprom_memory()
   
   for(i = 0; i < min(gprs_apn.length(),39); i++)
   {
-    EEPROM.write(90 + i, gprs_apn[i]);
+    EEPROM.write(82 + i, gprs_apn[i]);
   }
-  EEPROM.write(90+i, '\0');
+  EEPROM.write(82+i, '\0');
   
   //
   //  Store username
@@ -655,19 +649,19 @@ void write_eeprom_memory()
   
   for(i = 0; i < min(gprs_username.length(), 39); i++)
   {
-    EEPROM.write(130 + i, gprs_username[i]);
+    EEPROM.write(122 + i, gprs_username[i]);
   }
-  EEPROM.write(130+i, '\0');
+  EEPROM.write(122+i, '\0');
   
   //
   //  Store password
   //
   
-  for(i = 0; i < min(gprs_password.length(), 18); i++)
+  for(i = 0; i < min(gprs_password.length(), 26); i++)
   {
-    EEPROM.write(170 + i, gprs_password[i]);
+    EEPROM.write(162 + i, gprs_password[i]);
   }
-  EEPROM.write(170+i, '\0');
+  EEPROM.write(162+i, '\0');
   
   //
   //  Store AES key
@@ -725,7 +719,7 @@ void read_eeprom_memory()
   //
   
   float_hub_server = "";
-  for(i = 0; i < 70; i++)
+  for(i = 0; i < 62; i++)
   {
     next_char = EEPROM.read(18 + i);    
     if(next_char == '\0')
@@ -739,8 +733,8 @@ void read_eeprom_memory()
   //  Get port
   //
   
-  float_hub_server_port  = EEPROM.read(89);
-  float_hub_server_port += EEPROM.read(88) * 256;
+  float_hub_server_port  = EEPROM.read(81);
+  float_hub_server_port += EEPROM.read(80) * 256;
 
   //
   //  Get gprs apn
@@ -749,7 +743,7 @@ void read_eeprom_memory()
   gprs_apn = "";
   for(i = 0; i < 40; i++)
   {
-    next_char = EEPROM.read(90 + i);
+    next_char = EEPROM.read(82 + i);
     if(next_char == '\0')
     {
       break;
@@ -764,7 +758,7 @@ void read_eeprom_memory()
   gprs_username = "";
   for(i = 0; i < 40; i++)
   {
-    next_char = EEPROM.read(130 + i);
+    next_char = EEPROM.read(122 + i);
     if(next_char == '\0')
     {
       break;
@@ -779,7 +773,7 @@ void read_eeprom_memory()
   gprs_password = "";
   for(i = 0; i < 19; i++)
   {
-    next_char = EEPROM.read(170 + i);
+    next_char = EEPROM.read(162 + i);
     if(next_char == '\0')
     {
       break;
@@ -2414,6 +2408,9 @@ void wifi_read()
       }
       else
       {
+        #ifdef WIFI_DEBUG_ON
+        debug_info("Wifi can't send");
+        #endif
         wifi_client.stop();
       }
     }
@@ -2529,12 +2526,24 @@ void wifi_scan()
     {
         home_encryption_type = WiFi.encryptionType(i);
         see_home_network = true;
+        #ifdef WIFI_DEBUG_ON
+        debug_info("Saw home net: " + String(WiFi.SSID(i)));
+        #endif
     }
-    if(WiFi.encryptionType(i) == 7)
+    else if(WiFi.encryptionType(i) == 7)
     {
       see_open_network = true;
       open_network_name = WiFi.SSID(i);
+        #ifdef WIFI_DEBUG_ON
+        debug_info("Saw open net: " + String(WiFi.SSID(i)));
+        #endif
     }    
+    #ifdef WIFI_DEBUG_ON
+    else
+    {
+        debug_info("Saw other net: " + String(WiFi.SSID(i)));
+    }
+    #endif
   }
 
   if(WiFi.status() != WL_CONNECTED)
