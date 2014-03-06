@@ -3,15 +3,3 @@ fhcore
 
 Core arduino code providing floathub functionality. See floathub.com for
 more information.
-
-You need a working arduino development environment, but this project is
-intended to be built on the command line.  It uses the arduino-mk file
-developped by (http://ed.am/dev/make/arduino-mk).
-
-To build, type:
-
-	make
-
-To push hex code to arduino/floathub attached via usb, type:
-
-	make upload
