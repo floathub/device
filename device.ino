@@ -2486,12 +2486,12 @@ void slide_memory(unsigned int start, unsigned int how_many, unsigned int what_w
 void wifi_read()
 {
   #ifdef WIFI_DEBUG_ON
-  debug_info("E wifi_read()");
+  debug_info("E wr()");
   #endif
   if(gprs_or_wifi_communications_on == false)
   {
     #ifdef WIFI_DEBUG_ON
-    debug_info("QA wifi_read()");
+    debug_info("QA wr()");
     #endif
     return;
   }
@@ -2502,13 +2502,19 @@ void wifi_read()
     #ifdef WIFI_DEBUG_ON
     debug_info("*** Reseting Wifi (Watchdog)  ***");
     #endif
+    if(wifi_client.connected())
+    {
+      wifi_client.stop();
+      wifi_client.flush();
+      wifi_client.stop();
+    }
     wifi_on_home_network = false;
     WiFi.disconnect();
     wifi_communication_state = idle;
     gprs_or_wifi_watchdog_timestamp = current_timestamp;
     wifi_scan();
     #ifdef WIFI_DEBUG_ON
-    debug_info("QB wifi_read()");
+    debug_info("QB wr()");
     #endif
     return;
   }
@@ -2516,7 +2522,7 @@ void wifi_read()
   {
     wifi_communication_state = idle;
     #ifdef WIFI_DEBUG_ON
-    debug_info("QC wifi_read()");
+    debug_info("QC wr()");
     #endif
     return;
   }
@@ -2546,7 +2552,7 @@ void wifi_read()
       else
       {
         #ifdef WIFI_DEBUG_ON
-        debug_info("Wifi can't send");
+        debug_info("Wifi no comm");
         #endif
         wifi_client.stop();
       }
@@ -2593,7 +2599,7 @@ void wifi_read()
     }
   }    
   #ifdef WIFI_DEBUG_ON
-  debug_info("QD wifi_read()");
+  debug_info("QD wr()");
   #endif
 }
 
