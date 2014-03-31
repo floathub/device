@@ -1,7 +1,7 @@
 /*
 
  FloatHub Arduino Code
- (c) 2011-2013 Modiot Labs
+ (c) 2011-2014 Modiot Labs
  (begun June 6, 2011)
 
 
@@ -76,16 +76,17 @@
   Compile time option/debug flags
 */
 
-#define   WIFI_NOT_CELL
-#define WIFI_DEBUG_ON
+//#define   WIFI_NOT_CELL
+//#define WIFI_DEBUG_ON
 //#define GPRS_DEBUG_ON
-//#define GPS_DEBUG_ON
+#define GPS_DEBUG_ON
 //#define PUMP_DEBUG_ON
 //#define EXECUTION_PATH_DEBUG_ON
 //#define NMEA_DEBUG_ON
 //#define DEBUG_MEMORY_ON
 //#define BYPASS_AES_ON
 //#define BARO_DEBUG_ON	
+#define GPS_SERIAL_SPEED 9600	//4800 for older GPS devices
 
 
 /*
@@ -402,15 +403,28 @@ void gps_setup()
   //  Setup gps on serial device 3, and make it send only GGA and RMC NMEA sentences
   //
 
-  Serial3.begin(4800);
+  Serial3.begin(GPS_SERIAL_SPEED);
   delay(1000);
-  //Serial3.println("$PSTMNMEACONFIG,0,4800,66,1");
+
+  //
+  //	Older GPS
+  //
+
+  /*
+  Serial3.println("$PSTMNMEACONFIG,0,4800,66,1");
   Serial3.println(F("$PSRF103,00,00,02,01*26"));  //  GGA ON every 2 seconds
   Serial3.println(F("$PSRF103,01,00,00,01*25"));  //  GLL OFF
   Serial3.println(F("$PSRF103,02,00,00,01*26"));  //  GSA OFF
   Serial3.println(F("$PSRF103,03,00,00,01*27"));  //  GSV OFF
   Serial3.println(F("$PSRF103,04,00,02,01*22"));  //  RMC ON every 2 seconds
   Serial3.println(F("$PSRF103,05,00,00,01*21"));  //  VTG Off
+  */
+  
+  //
+  //	MTK3339 / Ultimate GPS breakout from Adafruit
+  //
+  
+  Serial3.println("$PMTK314,0,2,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0*28");
 }
 
 
@@ -1037,13 +1051,6 @@ void bmp_read()
   float average = 0.0;
   handy = 0;  
 
-  //
-  //	Seems more accurate of you read temperature first
-  //
-
-  //temperature = (1.8 * bmp.readTemperature()) + 32 - 5.6;
-  //pressure = bmp.readPressure() * 0.000295300;
-
   for(i =0; i < BARO_HISTORY_LENGTH - 1 ; i++)
   {
     if(temperature_history[i] > 1)
@@ -1053,7 +1060,9 @@ void bmp_read()
     }
     temperature_history[i] = temperature_history[i+1];
   }
-  temperature_history[BARO_HISTORY_LENGTH - 1] = (1.8 * bmp.readTemperature()) + 32 - 5.6;
+
+  //temperature_history[BARO_HISTORY_LENGTH - 1] = (1.8 * bmp.readTemperature()) + 32 - 5.6;
+  temperature_history[BARO_HISTORY_LENGTH - 1] = (1.8 * bmp.readTemperature()) + 32;
 
   if(handy > 0)
   {
@@ -1118,7 +1127,18 @@ void bmp_read()
   {
     pressure = pressure_history[BARO_HISTORY_LENGTH - 1];
   }
-  
+
+
+
+  //
+  //	Seems more accurate of you read temperature first
+  //
+
+  //temperature = (1.8 * bmp.readTemperature()) + 32 - 5.6;
+  //temperature = (1.8 * bmp.readTemperature()) + 32;
+  //pressure = bmp.readPressure() * 0.000295300;
+
+
 }
 
 
