@@ -85,10 +85,10 @@
 #define   WIFI_NOT_CELL
 #define WIFI_DEBUG_ON
 //#define GPRS_DEBUG_ON
-//#define GPS_DEBUG_ON
+#define GPS_DEBUG_ON
 //#define PUMP_DEBUG_ON
 //#define EXECUTION_PATH_DEBUG_ON
-//#define NMEA_DEBUG_ON
+#define NMEA_DEBUG_ON
 #define DEBUG_MEMORY_ON
 //#define STRESS_MEMORY_ON
 //#define BYPASS_AES_ON
@@ -447,7 +447,9 @@ void gps_setup()
   //
   
   //Serial3.println("$PMTK314,0,2,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0*28");	// Every 2 seconds
-  Serial3.println("$PMTK314,0,3,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0*2A");		// GGA every 1 second, RMC every 3
+  //Serial3.println("$PMTK314,0,3,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0*2A");		// GGA every 1 second, RMC every 3
+  Serial3.println("$PMTK314,0,3,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0*29");		// GGA every 2 second, RMC every 3
+  //Serial3.println("$PMTK314,0,5,0,3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0*2E");		// GGA every 3 second, RMC every 5
 }
 
 
@@ -1212,7 +1214,8 @@ void parse_gps_buffer_as_rmc()
       sog_start < 0     ||    sog_start >= (int) gps_read_buffer.length()     ||
       tmg_start < 0     ||    tmg_start >= (int) gps_read_buffer.length()     ||
       date_start < 0    ||    date_start >= (int) gps_read_buffer.length()    ||
-      var_start < 0     ||    var_start >= (int) gps_read_buffer.length()     )
+      var_start < 0     ||    var_start >= (int) gps_read_buffer.length()     ||
+      gps_read_buffer.lastIndexOf('$') > 0)
   {
       #ifdef GPS_DEBUG_ON
       debug_info(F("Bad RMC string"));
@@ -1390,7 +1393,8 @@ void parse_gps_buffer_as_gga()
       siv_start < 0  ||   siv_start >= (int) gps_read_buffer.length()    ||
       hdp_start < 0  ||   hdp_start >= (int) gps_read_buffer.length()    ||
       alt_start < 0  ||   alt_start >= (int) gps_read_buffer.length()    ||
-      altu_start < 0 ||   altu_start >= (int) gps_read_buffer.length())
+      altu_start < 0 ||   altu_start >= (int) gps_read_buffer.length()   ||
+      gps_read_buffer.lastIndexOf('$') > 0)
   {
       gps_valid = false;
       #ifdef GPS_DEBUG_ON
@@ -1447,6 +1451,39 @@ void push_out_nmea_sentence(bool from_nmea_in)
   }
 }
 
+bool validate_gps_buffer()
+{
+  byte_zero = 0;
+  for(i = gps_read_buffer.indexOf('$') + 1; i < gps_read_buffer.lastIndexOf('*'); i++)
+  {
+    byte_zero = byte_zero ^ gps_read_buffer.charAt(i);
+  }
+  if(gps_read_buffer.endsWith(String(byte_zero, HEX)))
+  {
+    return true;
+  }
+  #ifdef GPS_DEBUG_ON
+  debug_info("Bad GPS buffer: " + gps_read_buffer);
+  #endif
+  return false;  
+}
+
+bool validate_nmea_buffer()
+{
+  byte_zero = 0;
+  for(i = nmea_read_buffer.indexOf('$') + 1; i < nmea_read_buffer.lastIndexOf('*'); i++)
+  {
+    byte_zero = byte_zero ^ nmea_read_buffer.charAt(i);
+  }
+  if(nmea_read_buffer.endsWith(String(byte_zero, HEX)))
+  {
+    return true;
+  }
+  #ifdef NMEA_DEBUG_ON
+  debug_info("Bad NMEA buffer: " + nmea_read_buffer);
+  #endif
+  return false;  
+}
 
 
 void gps_read()
@@ -1456,23 +1493,26 @@ void gps_read()
      int incoming_byte = Serial3.read();
      if(incoming_byte == '\n')
      {
-       if(gps_read_buffer.indexOf("$GPRMC,") == 0)
+       if(validate_gps_buffer())
        {
-         #ifdef GPS_DEBUG_ON
-         debug_info(F("--GPS BUF RMC--"));
-         debug_info(gps_read_buffer);
-         #endif
-         push_out_nmea_sentence(false);
-         parse_gps_buffer_as_rmc();
-       }
-       else if(gps_read_buffer.indexOf("$GPGGA,") == 0)
-       {
-         #ifdef GPS_DEBUG_ON
-         debug_info(F("--GPS BUF GGA--"));
-         debug_info(gps_read_buffer);
-         #endif
-         push_out_nmea_sentence(false);
-         parse_gps_buffer_as_gga();
+         if(gps_read_buffer.indexOf("$GPRMC,") == 0)
+         {
+           #ifdef GPS_DEBUG_ON
+           debug_info(F("--GPS BUF RMC--"));
+           debug_info(gps_read_buffer);
+           #endif
+           push_out_nmea_sentence(false);
+           parse_gps_buffer_as_rmc();
+         }
+         else if(gps_read_buffer.indexOf("$GPGGA,") == 0)
+         {
+           #ifdef GPS_DEBUG_ON
+           debug_info(F("--GPS BUF GGA--"));
+           debug_info(gps_read_buffer);
+           #endif
+           push_out_nmea_sentence(false);
+           parse_gps_buffer_as_gga();
+          }
        }
        gps_read_buffer = "";
      }
@@ -1487,6 +1527,9 @@ void gps_read()
   }
   if((int) gps_read_buffer.length() >= MAX_GPS_BUFFER - 1 )
   {
+    #ifdef GPS_DEBUG_ON
+    debug_info(F("nuked gps buf"));
+    #endif
     gps_read_buffer = "";
   }
 }
@@ -3651,8 +3694,11 @@ void update_nmea()
      int incoming_byte = Serial2.read();
      if(incoming_byte == '\n')
      {
-       push_out_nmea_sentence(true);
-       parse_nmea_sentence();
+       if(validate_nmea_buffer())
+       {
+         push_out_nmea_sentence(true);
+         parse_nmea_sentence();
+       }
        nmea_read_buffer = "";
      }
      else if (incoming_byte == '\r')
