@@ -5,17 +5,23 @@
  (begun June 6, 2011)
 
 
+  April 4, 2014
+  
+  Change wireless to use Adafruit CC3000 shield as the "official" Arduino
+  wifi shield is simply not reliable. Remove hardware reset. 
+
+
   March 6, 2014
   
   Make changes to use a hardware line tied to the reset pin via a 1K Ohm
   resistor.  This can be triggered after repeated failed attempts to
-  communicate, thus making the wifishield acceptably reliable (in tends to
-  come back up ok after a hardware reset).
+  communicate, in an attempt to make the Arduino wifi shield acceptably
+  reliable (in tends to come back up ok after a hardware reset).
 
 
   Feb 21, 2014
   
-  But Wifi version on hold as Arduion Wifi Shield is simply not reliable
+  Put Wifi version on hold as Arduion Wifi Shield is simply not reliable
   with current library and firmware versions.
 
   Feb 20, 2014
@@ -48,7 +54,7 @@
   April, 2013
   
   Brought in encrypted/$FHS code that was working back in July and made it
-  trunk It encrypts content using aes-128-cbc encryption
+  trunk. It encrypts content using aes-128-cbc encryption
 
   May 2013
   
@@ -58,6 +64,7 @@
  
 */
 
+#include <Adafruit_CC3000.h>
 #include <Wire.h>
 #include <Adafruit_BMP085.h>
 #include <EEPROM.h>
@@ -67,7 +74,6 @@
 #include <Base64.h>
 #include <avr/wdt.h>
 #include <util/crc16.h>
-#include <WiFi.h>
 #include <SPI.h>
 
 #include "sometypes.h"
@@ -76,18 +82,17 @@
   Compile time option/debug flags
 */
 
-//#define   WIFI_NOT_CELL
-//#define WIFI_DEBUG_ON
+#define   WIFI_NOT_CELL
+#define WIFI_DEBUG_ON
 //#define GPRS_DEBUG_ON
-#define GPS_DEBUG_ON
+//#define GPS_DEBUG_ON
 //#define PUMP_DEBUG_ON
 //#define EXECUTION_PATH_DEBUG_ON
 //#define NMEA_DEBUG_ON
-//#define DEBUG_MEMORY_ON
+#define DEBUG_MEMORY_ON
+//#define STRESS_MEMORY_ON
 //#define BYPASS_AES_ON
 //#define BARO_DEBUG_ON	
-#define GPS_SERIAL_SPEED 9600	//4800 for older GPS devices
-
 
 /*
   Anything which changes what the Floathub Data Receiver (fdr) needs to do
@@ -104,12 +109,23 @@
 #endif
 
 
+/*
+  Adafruit CC3000 wireless library settings
+*/
+
+#ifdef WIFI_NOT_CELL
+#define ADAFRUIT_CC3000_IRQ   3
+#define ADAFRUIT_CC3000_VBAT  5
+#define ADAFRUIT_CC3000_CS    10
+#endif
 
 /*
   Some AES variables
 */
 
-#define MAX_AES_CIPHER_LENGTH 1536
+#define MAX_AES_CIPHER_LENGTH 1024
+//#define MAX_AES_CIPHER_LENGTH 1536
+//#define MAX_AES_CIPHER_LENGTH 2048
 AES aes;
 byte iv[16];
 byte volatile_iv[16];
@@ -160,7 +176,10 @@ unsigned long last_detailed_eeprom_write;
 /*
    Some global Strings, character arrays
 */
- 
+
+
+#define MAX_LATEST_MESSAGE_SIZE 512
+#define MAX_NEW_MESSAGE_SIZE 256 
 String latest_message_to_send = "";
 String new_message = "";
 char   temp_string[20];  
@@ -201,7 +220,7 @@ unsigned long wifi_read_interval = 8000;           	//  Do wifi i/o communicatio
 unsigned long led_update_interval = 200;          	//  Update the LED's every 200 miliseconds
 unsigned long nmea_update_interval = 100;         	//  Update NMEA in serial line every 1/10 of a second
 boolean green_led_state = false;         	  	//  For cycling on and off  
-unsigned long hardware_watchdog_interval = 60000; 	//  Do a hardware reset if we don't pat the dog every 60 seconds
+unsigned long hardware_watchdog_interval = 120000; 	//  Do a hardware reset if we don't pat the dog every 2 minutes
   
 unsigned long sensor_previous_timestamp = 0;
 unsigned long gps_previous_timestamp = 0;
@@ -236,7 +255,9 @@ int  gprs_or_wifi_watchdog_counter = 0;
 #define	MAX_GPRS_READ_BUFFER	64
 
 #ifdef WIFI_NOT_CELL
-WiFiClient wifi_client;
+Adafruit_CC3000 cc3000 = Adafruit_CC3000(ADAFRUIT_CC3000_CS, ADAFRUIT_CC3000_IRQ, ADAFRUIT_CC3000_VBAT, SPI_CLOCK_DIVIDER);
+Adafruit_CC3000_Client cc3000_client;
+
 bool wifi_on_home_network;
 
 enum wireless_communication_state
@@ -378,12 +399,12 @@ void print_free_memory()
   {
     free_memory = ((int)&free_memory) - ((int)__brkval);
   }
-  debug_info("Mem Free:", free_memory);
+  debug_info(F("Mem Free:"), free_memory);
 }
 #endif
 
 /*
-    Setup SPI for barometric and temperature
+    Setup for barometric and temperature
 */
 
 
@@ -403,7 +424,7 @@ void gps_setup()
   //  Setup gps on serial device 3, and make it send only GGA and RMC NMEA sentences
   //
 
-  Serial3.begin(GPS_SERIAL_SPEED);
+  Serial3.begin(9600);
   delay(1000);
 
   //
@@ -411,6 +432,7 @@ void gps_setup()
   //
 
   /*
+  Serial3.begin(4800);
   Serial3.println("$PSTMNMEACONFIG,0,4800,66,1");
   Serial3.println(F("$PSRF103,00,00,02,01*26"));  //  GGA ON every 2 seconds
   Serial3.println(F("$PSRF103,01,00,00,01*25"));  //  GLL OFF
@@ -424,10 +446,31 @@ void gps_setup()
   //	MTK3339 / Ultimate GPS breakout from Adafruit
   //
   
-  Serial3.println("$PMTK314,0,2,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0*28");
+  //Serial3.println("$PMTK314,0,2,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0*28");	// Every 2 seconds
+  Serial3.println("$PMTK314,0,3,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0*2A");		// GGA every 1 second, RMC every 3
 }
 
 
+
+#ifdef WIFI_NOT_CELL
+void wifi_setup()
+{
+  #ifdef WIFI_DEBUG_ON
+  debug_info(F("Wifi init"));
+  #endif
+  if (!cc3000.begin())
+  {
+    #ifdef WIFI_DEBUG_ON
+    debug_info(F("No wifi init"));
+    #endif
+  }
+  else
+  {
+    cc3000.reboot(NULL);
+    cc3000.setPrinter(NULL);
+  }
+}
+#endif
 
 #ifndef WIFI_NOT_CELL
 void gprs_setup()
@@ -471,10 +514,10 @@ void pat_the_watchdog()
   else
   {
     #ifdef GPRS_DEBUG_ON
-    debug_info("No dog pat");
+    debug_info(F("No dog pat"));
     #endif
     #ifdef WIFI_DEBUG_ON
-    debug_info("No dog pat");
+    debug_info(F("No dog pat"));
     #endif
   }
 }
@@ -867,6 +910,8 @@ void setup()
   console_read_buffer.reserve(MAX_CONSOLE_BUFFER);
   gps_read_buffer.reserve(MAX_GPS_BUFFER);
   nmea_read_buffer.reserve(MAX_NMEA_BUFFER);
+  new_message.reserve(MAX_NEW_MESSAGE_SIZE);
+  latest_message_to_send.reserve(MAX_LATEST_MESSAGE_SIZE);
 
   bmp_setup();
   gps_setup();
@@ -921,14 +966,6 @@ void setup()
 
 
   //
-  //   HACK HACK HACK
-  //
-
-  pinMode(4, OUTPUT);
-  digitalWrite(4, HIGH);
-   
-
-  //
   //  Handle EEPROM logic for persistant settings (if the first 6 bytes of
   //  EEPROM memory are not all set to 42, then this is a completely
   //  unitialized device)
@@ -962,6 +999,14 @@ void setup()
   
   watchdog_setup();
   
+
+  //
+  //	Possibly init wifi
+  //
+  
+  #ifdef WIFI_NOT_CELL
+  wifi_setup();
+  #endif
 
   //
   //  Announce we are up
@@ -1170,7 +1215,7 @@ void parse_gps_buffer_as_rmc()
       var_start < 0     ||    var_start >= (int) gps_read_buffer.length()     )
   {
       #ifdef GPS_DEBUG_ON
-      debug_info("Bad RMC string");
+      debug_info(F("Bad RMC string"));
       debug_info(gps_read_buffer);
       #endif
       return;
@@ -1224,7 +1269,7 @@ void parse_gps_buffer_as_rmc()
     if(!gps_valid) 
     {
       #ifdef GPS_DEBUG_ON
-      debug_info("Gps fix");
+      debug_info(F("Gps fix"));
       #endif
     }
     gps_valid = true;
@@ -1234,7 +1279,7 @@ void parse_gps_buffer_as_rmc()
     if(gps_valid)
     {
       #ifdef GPS_DEBUG_ON
-      debug_info("Gps no fix");
+      debug_info(F("Gps no fix"));
       #endif
     }
     gps_valid = false;
@@ -1349,7 +1394,7 @@ void parse_gps_buffer_as_gga()
   {
       gps_valid = false;
       #ifdef GPS_DEBUG_ON
-      debug_info("Bad GGA string");
+      debug_info(F("Bad GGA string"));
       debug_info(gps_read_buffer);
       #endif
       return;
@@ -1414,7 +1459,7 @@ void gps_read()
        if(gps_read_buffer.indexOf("$GPRMC,") == 0)
        {
          #ifdef GPS_DEBUG_ON
-         debug_info("--GPS BUF RMC--");
+         debug_info(F("--GPS BUF RMC--"));
          debug_info(gps_read_buffer);
          #endif
          push_out_nmea_sentence(false);
@@ -1423,7 +1468,7 @@ void gps_read()
        else if(gps_read_buffer.indexOf("$GPGGA,") == 0)
        {
          #ifdef GPS_DEBUG_ON
-         debug_info("--GPS BUF GGA--");
+         debug_info(F("--GPS BUF GGA--"));
          debug_info(gps_read_buffer);
          #endif
          push_out_nmea_sentence(false);
@@ -1496,7 +1541,7 @@ void individual_pump_read(int pump_number, pump_state &state, int analog_input)
      else if(state == off)
      {
        #ifdef PUMP_DEBUG_ON
-       debug_info("Pump turned on!");
+       debug_info(F("Pump turned on!"));
        #endif
        new_message = "$FHB:";
        new_message += float_hub_id;
@@ -1525,7 +1570,7 @@ void individual_pump_read(int pump_number, pump_state &state, int analog_input)
      else if(state == on)
      {
        #ifdef PUMP_DEBUG_ON
-       debug_info("Pump turned off!");
+       debug_info(F("Pump turned off!"));
        #endif
        new_message = "$FHB:";
        new_message += float_hub_id;
@@ -2467,7 +2512,7 @@ void queue_pump_message(int which_pump, bool is_on)
     latest_message_to_send = new_message;
     encode_latest_message_to_send();
   }
-  else
+  else if(timeStatus() != timeNotSet)
   {
     //
     //  Need to store pump state in EEPROM
@@ -2503,78 +2548,138 @@ void slide_memory(unsigned int start, unsigned int how_many, unsigned int what_w
 
 #ifdef WIFI_NOT_CELL
 
-void wifi_read()
+void nuke_wireless(void)
 {
+  unsigned long current_timestamp = millis();
   #ifdef WIFI_DEBUG_ON
-  debug_info("E wr()");
+  debug_info(F("*** Resetting Wifi ***"));
   #endif
-  if(gprs_or_wifi_communications_on == false)
+  cc3000.disconnect();
+  cc3000.reboot(NULL);
+  wifi_on_home_network = false;
+  wifi_communication_state = idle;
+  gprs_or_wifi_watchdog_timestamp = current_timestamp;
+  return;
+}
+
+bool open_fdr()
+{
+
+  // Open a connection to the floathub server (usually fdr.floathub.net)
+
+  float_hub_server.toCharArray(temp_string_a, 40);
+  uint32_t ip = 0;
+  if(cc3000.getHostByName(temp_string_a, &ip) && ip > 0)
+  {
+    cc3000_client = cc3000.connectTCP(ip, float_hub_server_port);
+    if(cc3000_client.connected())
+    {
+      return true;
+    }
+    #ifdef WIFI_DEBUG_ON
+    debug_info(F("Wifi No comm"));
+    #endif
+    cc3000_client.close();
+    return false;
+  }
+  if(ip < 1)
   {
     #ifdef WIFI_DEBUG_ON
-    debug_info("QA wr()");
+    debug_info(F("Wifi DNS failure"));
     #endif
+  }
+  else
+  {
+    #ifdef WIFI_DEBUG_ON
+    debug_info(F("Wifi DNS lookup failure"));
+    #endif
+  }
+  return false;
+}
+
+
+bool push_latest_message_out_socket(void)
+{
+  //
+  //	Send message in chunks of about 32 bytes. Too big, and we die due to
+  //	running out of memory.  Too small, and it takes forever to send the
+  //	message
+  //
+  
+  for(i = 0; i < latest_message_to_send.length(); i = i + 32)
+  {
+    for(handy = 0; handy + i < latest_message_to_send.length() && handy < 32; handy++)
+    {
+      plain[handy] = (char) latest_message_to_send.charAt(i + handy);
+    } 
+    if(cc3000_client.write(plain, handy) != handy)
+    {
+      return false;
+    }
+  }
+  plain[0] = '\r';
+  plain[1] = '\n';
+  if(cc3000_client.write(plain, 2) != 2)
+  {
+    return false;
+  }
+  return true;
+}
+
+
+
+void wifi_read()
+{
+  if(gprs_or_wifi_communications_on == false)
+  {
     return;
   }
   unsigned long current_timestamp = millis();
   if(current_timestamp - gprs_or_wifi_watchdog_timestamp > gprs_or_wifi_watchdog_interval)
   {
     gprs_or_wifi_watchdog_counter++;
-    #ifdef WIFI_DEBUG_ON
-    debug_info("*** Reseting Wifi (Watchdog)  ***");
-    #endif
-    if(wifi_client.connected())
-    {
-      wifi_client.stop();
-      wifi_client.flush();
-      wifi_client.stop();
-    }
-    wifi_on_home_network = false;
-    WiFi.disconnect();
-    wifi_communication_state = idle;
-    gprs_or_wifi_watchdog_timestamp = current_timestamp;
-    wifi_scan();
-    #ifdef WIFI_DEBUG_ON
-    debug_info("QB wr()");
-    #endif
-    return;
+    nuke_wireless();
   }
-  if(WiFi.status() != WL_CONNECTED)
+
+  if(cc3000.getStatus() != STATUS_CONNECTED)
   {
     wifi_communication_state = idle;
     #ifdef WIFI_DEBUG_ON
-    debug_info("QC wr()");
+    debug_info(F("Wifi no conn yet"));
     #endif
     return;
   }
   
+  if(!cc3000.checkDHCP())
+  {
+    #ifdef WIFI_DEBUG_ON
+    debug_info(F("Wifi no IP yet"));
+    #endif
+    return;
+  }
+
+
   if(wifi_communication_state == idle)
   {
     if(latest_message_to_send.length() > 0)
     {
-      float_hub_server.toCharArray(temp_string_a, 40);
-      if (wifi_client.connect(temp_string_a, float_hub_server_port))
-//      byte addthing[4] = {54, 213, 47, 184}; 
-//      if (wifi_client.connect(addthing, 50003)) 
+      if(open_fdr())
       {
-        for(i = 0; i < latest_message_to_send.length() ; i++)
+        if(push_latest_message_out_socket())
         {
-            wifi_client.write(latest_message_to_send.charAt(i));
+          #ifdef WIFI_DEBUG_ON
+          debug_info(F("Wifi Sent FHx"));
+          #endif
+          gprs_or_wifi_watchdog_timestamp = current_timestamp;
+          wifi_communication_state = waiting_for_response;
+          wifi_read_buffer = "";
         }
-        wifi_client.write('\r');
-        wifi_client.write('\n');
         #ifdef WIFI_DEBUG_ON
-        debug_info("Sent: " + latest_message_to_send);
+        else
+        {
+          debug_info(F("Wifi sock prob"));
+        }
         #endif
-        gprs_or_wifi_watchdog_timestamp = current_timestamp;
-        wifi_communication_state = waiting_for_response;
-        wifi_read_buffer = "";
-      }
-      else
-      {
-        #ifdef WIFI_DEBUG_ON
-        debug_info("Wifi no comm");
-        #endif
-        wifi_client.stop();
       }
     }
     else
@@ -2584,10 +2689,16 @@ void wifi_read()
   }
   else if(wifi_communication_state == waiting_for_response)
   {
-    while (wifi_client.available() && wifi_read_buffer.length() < MAX_WIFI_BUFFER)
+    unsigned long lastRead = millis();
+    while (cc3000_client.connected() && (millis() - lastRead < 3000))
     {
-      wifi_read_buffer += (char) wifi_client.read();
+        while (cc3000_client.available())
+        {
+          wifi_read_buffer += (char) cc3000_client.read();
+          lastRead = millis();
+        }
     }
+
     if(wifi_read_buffer.indexOf("$FHR$ OK") > -1)
     {
       gprs_or_wifi_watchdog_counter = 0;
@@ -2595,162 +2706,183 @@ void wifi_read()
       pop_off_message_queue();
       if(latest_message_to_send.length() > 0)
       {
-        for(i = 0; i < latest_message_to_send.length() ; i++)
+        if(push_latest_message_out_socket())
         {
-            wifi_client.write(latest_message_to_send.charAt(i));
+          #ifdef WIFI_DEBUG_ON
+          debug_info(F("Wifi more FHx"));
+          #endif
+          wifi_communication_state = waiting_for_response;
+          wifi_read_buffer = "";
         }
-        wifi_client.write('\r');
-        wifi_client.write('\n');
-        #ifdef WIFI_DEBUG_ON
-        debug_info("Sent via wifi: " + latest_message_to_send);
-        #endif
-        wifi_communication_state = waiting_for_response;
-        wifi_read_buffer = "";
+        else
+        {
+          #ifdef WIFI_DEBUG_ON
+          debug_info(F("Wifi Hangup"));
+          #endif
+        }
       }
       else
       {
         wifi_read_buffer = "";
-        wifi_client.stop();
-        wifi_client.flush();
-        wifi_client.stop();
-        wifi_client.stop();
+        cc3000_client.close();
         wifi_communication_state = idle;
       }
     }
   }    
-  #ifdef WIFI_DEBUG_ON
-  debug_info("QD wr()");
-  #endif
 }
 
-void hop_on_home_network(int encryption_type)
+void hop_on_home_network(uint8_t encryption_type)
 {
+
   wifi_on_home_network = false;
   gprs_apn.toCharArray(temp_string_a, 40);
   gprs_password.toCharArray(temp_string_b, 40);
-  if(encryption_type == 5)
+
+
+  if (cc3000.deleteProfiles())
   {
-    if(WiFi.begin(temp_string_a, 1, temp_string_b) == WL_CONNECTED)
-    {
-      #ifdef WIFI_DEBUG_ON
-      debug_info("WiFi home net wep");
-      #endif
-      wifi_on_home_network = true;
-    }
-    else
-    {
-      #ifdef WIFI_DEBUG_ON
-      debug_info("WiFi home net wep error");
-      #endif
-    }        
+    #ifdef WIFI_DEBUG_ON
+    debug_info(F("wifi pro out"));
+    #endif
   }
   else
-  {      
-    if(WiFi.begin(temp_string_a, temp_string_b) == WL_CONNECTED)
-    {
-      #ifdef WIFI_DEBUG_ON
-      debug_info("WiFi home net");
-      #endif
-      wifi_on_home_network = true;
-    }
-    else
-    {
-      #ifdef WIFI_DEBUG_ON
-      debug_info("WiFi home net error");
-      #endif
-    }
+  {
+    #ifdef WIFI_DEBUG_ON
+    debug_info(F("wifi pro fail"));
+    #endif
+  }           
+
+
+  if(cc3000.connectSecure(temp_string_a, temp_string_b, encryption_type))
+  //if(cc3000.connectToAP(temp_string_a, temp_string_b, encryption_type))
+  {
+    #ifdef WIFI_DEBUG_ON
+    debug_info(F("WiFi home net "), encryption_type);
+    #endif
+    wifi_on_home_network = true;
+  }
+  else
+  {
+    #ifdef WIFI_DEBUG_ON
+    debug_info(F("Failed WiFi home"));
+    #endif
   }
 }
+
 
 void wifi_scan()
 {
   
+  if(cc3000.getStatus() == STATUS_CONNECTED && wifi_on_home_network)
+  {
+    return;
+  }
   //
   //  We always scan for networks unless we are already attached to our
   //  preferred network, favouring our set network but using any open one we
   //  can find as well
   //
-  
-  if(WiFi.status() == WL_CONNECTED && wifi_on_home_network)
-  {
-    return;
-  }
+
+  #ifdef WIFI_DEBUG_ON
+  debug_info(F("=== Wifi scan start ==="));
+  #endif
 
   wifi_on_home_network = false;
   boolean see_home_network = false;
   boolean see_open_network = false;
  
-  byte home_encryption_type = 0;
+  uint8_t home_encryption_type = 0;
   String open_network_name;
 
-  byte numb_networks = WiFi.scanNetworks();
-  for (int i = 0; i < numb_networks; i++)
+
+  uint8_t valid, rssi, sec, index;
+  char ssidname[33]; 
+
+  index = cc3000.startSSIDscan();
+
+  while (index)
   {
-    if(gprs_apn.equals(WiFi.SSID(i)))
+    index--;
+
+    if(cc3000.getNextSSID(&rssi, &sec, ssidname))
     {
-        home_encryption_type = WiFi.encryptionType(i);
+      
+      if(gprs_apn.equals(ssidname))
+      {
+        home_encryption_type = sec;
         see_home_network = true;
         #ifdef WIFI_DEBUG_ON
-        debug_info("Saw home net: " + String(WiFi.SSID(i)));
-        #endif
-    }
-    else if(WiFi.encryptionType(i) == 7)
-    {
-      see_open_network = true;
-      open_network_name = WiFi.SSID(i);
-        #ifdef WIFI_DEBUG_ON
-        debug_info("Saw open net: " + String(WiFi.SSID(i)));
-        #endif
-    }    
-    #ifdef WIFI_DEBUG_ON
-    else
-    {
-        debug_info("Saw other net: " + String(WiFi.SSID(i)));
-    }
-    #endif
-  }
-
-  if(WiFi.status() != WL_CONNECTED)
-  {
-    #ifdef WIFI_DEBUG_ON
-    debug_info("No wifi connection");
-    #endif
-    if(see_home_network)
-    {
-      hop_on_home_network(home_encryption_type);
-    }
-    else if(see_open_network)
-    {
-      open_network_name.toCharArray(temp_string_a, 40);
-      if(WiFi.begin(temp_string_a) == WL_CONNECTED)
-      {
-        #ifdef WIFI_DEBUG_ON
-        debug_info("wifi open net: " + open_network_name);
+        debug_info("Home wifi: " + gprs_apn);
         #endif
       }
+      else if(sec == WLAN_SEC_UNSEC)
+      {
+        see_open_network = true;
+        if(open_network_name.length() < 1)
+        {
+          open_network_name = String(ssidname);
+        }
+        else if(random(0,100) < 25)
+        {
+          open_network_name = String(ssidname);
+        }
+        #ifdef WIFI_DEBUG_ON
+        debug_info("Open wifi: " + String(ssidname));
+        #endif
+        break;
+      }    
+      #ifdef WIFI_DEBUG_ON
       else
       {
-        #ifdef WIFI_DEBUG_ON
-        debug_info("wifi open net error");
-        #endif
+        debug_info("     wifi: " + String(ssidname));
       }
+      #endif
     }
   }
-  else
-  {
-    //
-    //  We are connected, but if not to home and we can see home, we want to connect to that
-    //
 
-    if(!String(WiFi.SSID()).startsWith(gprs_apn) && see_home_network)
+  cc3000.stopSSIDscan();
+
+  #ifdef WIFI_DEBUG_ON
+  debug_info(F("=== Wifi scan end ==="));
+  #endif
+
+
+  if(see_home_network)
+  {
+    hop_on_home_network(home_encryption_type);
+  }
+  else if(see_open_network && cc3000.getStatus() != STATUS_CONNECTED)
+  {
+    open_network_name.toCharArray(temp_string_a, 40);
+
+    if (cc3000.deleteProfiles())
     {
-      WiFi.disconnect();
-      hop_on_home_network(home_encryption_type);
+      #ifdef WIFI_DEBUG_ON
+      debug_info(F("wifi pro out"));
+      #endif
+    }
+    else
+    {
+      #ifdef WIFI_DEBUG_ON
+      debug_info(F("wifi pro fail"));
+      #endif
+    }           
+
+    if(cc3000.connectSecure(temp_string_a, temp_string_a, WLAN_SEC_UNSEC))
+    //if(cc3000.connectToAP(temp_string_a, temp_string_a, WLAN_SEC_UNSEC))
+    {
+      #ifdef WIFI_DEBUG_ON
+      debug_info("Wifi open connect: " + open_network_name);
+      #endif
+    }
+    else
+    {
+      #ifdef WIFI_DEBUG_ON
+      debug_info("Failed wifi connect: " + open_network_name);
+      #endif
     }
   }
 }
-
-
 
 #else
 
@@ -2771,14 +2903,14 @@ void gprs_read()
   {
     
     #ifdef GPRS_DEBUG_ON
-    debug_info("\\/ GPRS-DEBUG  \\/");
+    debug_info(F("\\/ GPRS-DEBUG  \\/"));
     debug_info(gprs_read_buffer);
     #endif
               
     if(gprs_read_buffer.indexOf("CME ERROR") > 0)
     {
       #ifdef GPRS_DEBUG_ON
-      debug_info("*** Reboot GPRS   ***");
+      debug_info(F("*** Reboot GPRS   ***"));
       #endif
       Serial1.println(F("AT+CFUN=0,1"));
       gprs_connection_state = waiting_for_sind;
@@ -2825,7 +2957,7 @@ void gprs_read()
       gprs_or_wifi_watchdog_timestamp = current_timestamp;
       Serial1.println(F("AT+CGACT=1,1"));
       #ifdef GPRS_DEBUG_ON
-      debug_info("Waiting on ACT=1,1...");
+      debug_info(F("Waiting on ACT=1,1..."));
       #endif
     }
     else if(gprs_connection_state == waiting_for_pdp_context_active && gprs_read_buffer.indexOf("OK") > 0)
@@ -2852,7 +2984,7 @@ void gprs_read()
       gprs_connection_state = we_be_connected;
       gprs_or_wifi_watchdog_timestamp = current_timestamp;
       #ifdef GPRS_DEBUG_ON
-      debug_info("We got internets!");
+      debug_info(F("We got internets!"));
       #endif
     }
   }
@@ -2946,7 +3078,7 @@ void gprs_read()
   {
     gprs_or_wifi_watchdog_counter++;
     #ifdef GPRS_DEBUG_ON
-    debug_info("*** Rebooting GPRS (Watchdog)  ***");
+    debug_info(F("*** Rebooting GPRS (Watchdog)  ***"));
     #endif
     Serial1.println(F("AT+CFUN=0,1"));
     gprs_connection_state = waiting_for_sind;
@@ -3028,7 +3160,7 @@ void parse_console()
       gprs_or_wifi_communications_on = true;
       #ifndef WIFI_NOT_CELL
       #ifdef GPRS_DEBUG_ON
-      debug_info("*** Rebooting GPRS (Watchdog)  ***");
+      debug_info(F("*** Rebooting GPRS (Watchdog)  ***"));
       #endif
       Serial1.println(F("AT+CFUN=0,1"));
       gprs_connection_state = waiting_for_sind;
@@ -3099,6 +3231,9 @@ void parse_console()
           display_string = "a=";
           display_string += gprs_apn;
           help_info(display_string);
+          #ifdef WIFI_NOT_CELL
+          nuke_wireless();
+          #endif
         }        
       }
       else if(console_read_buffer.startsWith("u=") && console_read_buffer.length() > 1)
@@ -3145,6 +3280,9 @@ void parse_console()
           display_string = "w=";
           display_string += gprs_password;
           help_info(display_string);
+          #ifdef WIFI_NOT_CELL
+          nuke_wireless();
+          #endif
         }        
       }
       else if(console_read_buffer.startsWith("p=") && console_read_buffer.length() > 2)
@@ -3344,6 +3482,7 @@ void update_leds()
   } 
 
   #ifdef WIFI_NOT_CELL
+/*
   if(WiFi.status() == WL_CONNECTED)
   {
     if(wifi_communication_state == idle)
@@ -3368,6 +3507,7 @@ void update_leds()
   {
     digitalWrite(GREEN_LED, LOW);
   }
+*/
   #else
 
   //
@@ -3540,10 +3680,10 @@ void encode_latest_message_to_send()
   #endif
 
 
-  #ifdef DEBUG_MEMORY_ON
+  #ifdef STRESS_MEMORY_ON
   for(i=0; i < 10; i++)
   {
-    latest_message_to_send += " MEMORY STRESS TEST";
+    latest_message_to_send += F(" MEMORY STRESS TEST");
   }
   #endif
 
