@@ -3482,8 +3482,7 @@ void update_leds()
   } 
 
   #ifdef WIFI_NOT_CELL
-/*
-  if(WiFi.status() == WL_CONNECTED)
+  if(cc3000.getStatus() == STATUS_CONNECTED)
   {
     if(wifi_communication_state == idle)
     {
@@ -3507,7 +3506,6 @@ void update_leds()
   {
     digitalWrite(GREEN_LED, LOW);
   }
-*/
   #else
 
   //
