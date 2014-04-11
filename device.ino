@@ -1451,31 +1451,56 @@ void push_out_nmea_sentence(bool from_nmea_in)
   }
 }
 
+
+
 bool validate_gps_buffer()
 {
+  String a_string;
   byte_zero = 0;
   for(i = gps_read_buffer.indexOf('$') + 1; i < gps_read_buffer.lastIndexOf('*'); i++)
   {
     byte_zero = byte_zero ^ gps_read_buffer.charAt(i);
   }
-  if(gps_read_buffer.endsWith(String(byte_zero, HEX)))
+  a_string = String(byte_zero, HEX);
+  a_string.toUpperCase();
+  if(gps_read_buffer.endsWith(a_string))
   {
     return true;
   }
+
+
   #ifdef GPS_DEBUG_ON
   debug_info("Bad GPS buffer: " + gps_read_buffer);
   #endif
   return false;  
 }
 
+bool validate_and_maybe_remediate_gps_buffer()
+{
+  if(validate_gps_buffer())
+  {
+    return true;
+  }
+  if(gps_read_buffer.lastIndexOf('$') > 0)
+  {
+    gps_read_buffer = gps_read_buffer.substring(gps_read_buffer.lastIndexOf('$')); 
+    return validate_gps_buffer();  
+    return validate_gps_buffer();  
+  }
+  return false;
+}
+
 bool validate_nmea_buffer()
 {
+  String a_string;
   byte_zero = 0;
   for(i = nmea_read_buffer.indexOf('$') + 1; i < nmea_read_buffer.lastIndexOf('*'); i++)
   {
     byte_zero = byte_zero ^ nmea_read_buffer.charAt(i);
   }
-  if(nmea_read_buffer.endsWith(String(byte_zero, HEX)))
+  a_string = String(byte_zero, HEX);
+  a_string.toUpperCase();
+  if(nmea_read_buffer.endsWith(a_string))
   {
     return true;
   }
@@ -1493,7 +1518,7 @@ void gps_read()
      int incoming_byte = Serial3.read();
      if(incoming_byte == '\n')
      {
-       if(validate_gps_buffer())
+       if(validate_and_maybe_remediate_gps_buffer())
        {
          if(gps_read_buffer.indexOf("$GPRMC,") == 0)
          {
