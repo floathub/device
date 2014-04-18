@@ -85,11 +85,11 @@
 #define   WIFI_NOT_CELL
 #define WIFI_DEBUG_ON
 //#define GPRS_DEBUG_ON
-#define GPS_DEBUG_ON
+//#define GPS_DEBUG_ON
 //#define PUMP_DEBUG_ON
 //#define EXECUTION_PATH_DEBUG_ON
 #define NMEA_DEBUG_ON
-#define DEBUG_MEMORY_ON
+//#define DEBUG_MEMORY_ON
 //#define STRESS_MEMORY_ON
 //#define BYPASS_AES_ON
 //#define BARO_DEBUG_ON	
@@ -448,8 +448,10 @@ void gps_setup()
   
   //Serial3.println("$PMTK314,0,2,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0*28");	// Every 2 seconds
   //Serial3.println("$PMTK314,0,3,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0*2A");		// GGA every 1 second, RMC every 3
-  Serial3.println("$PMTK314,0,3,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0*29");		// GGA every 2 second, RMC every 3
+  //Serial3.println("$PMTK314,0,3,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0*29");		// GGA every 2 second, RMC every 3
   //Serial3.println("$PMTK314,0,5,0,3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0*2E");		// GGA every 3 second, RMC every 5
+  Serial3.println("$PMTK314,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0*28");		// GGA & RMC every second
+  //Serial3.println("$PMTK314,0,2,0,3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0*29");		// GGA every 3 second, RMC every 2
 }
 
 
@@ -2725,8 +2727,7 @@ void wifi_read()
     #endif
     return;
   }
-
-
+  
   if(wifi_communication_state == idle)
   {
     if(latest_message_to_send.length() > 0)
@@ -3633,9 +3634,9 @@ bool popout_nmea_value(String data_type, int comma_begin, int comma_end, float &
 
 void parse_nmea_sentence()
 {
-
-//  Serial.print("NMEA: ");
-//  Serial.println(nmea_read_buffer);
+    #ifdef NMEA_DEBUG_ON
+    debug_info("NMEA buf:" + nmea_read_buffer);
+    #endif    
 
   int commas[8] = {-1, -1, -1, -1, -1, -1, -1 , -1};
 
@@ -3946,6 +3947,7 @@ void loop()
   {
     previous_console_timestamp = current_timestamp;
     report_state(true);
+    zero_nmea_values();
     #ifdef DEBUG_MEMORY_ON
     print_free_memory();
     #endif
