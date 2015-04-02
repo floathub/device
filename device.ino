@@ -190,6 +190,7 @@ unsigned long last_detailed_eeprom_write;
 #define MAX_NEW_MESSAGE_SIZE 256 
 String latest_message_to_send = "";
 String new_message = "";
+String a_string = "";
 char   temp_string[20];  
 char temp_string_a[41];
 char temp_string_b[41];
@@ -925,6 +926,7 @@ void setup()
   nmea_read_buffer.reserve(MAX_NMEA_BUFFER);
   new_message.reserve(MAX_NEW_MESSAGE_SIZE);
   latest_message_to_send.reserve(MAX_LATEST_MESSAGE_SIZE);
+  a_string.reserve(MAX_LATEST_MESSAGE_SIZE);
 
   bmp_setup();
   gps_setup();
@@ -1101,6 +1103,7 @@ void display_current_variables()
 void bmp_read()
 {
 
+
   //
   //	On some boards we very occasionally get an odd reading, so this
   //	history, average thing is just there to get rid of outliers
@@ -1149,7 +1152,6 @@ void bmp_read()
 
 
 
-
   for(i =0; i < BARO_HISTORY_LENGTH - 1 ; i++)
   {
     if(pressure_history[i] > 1)
@@ -1189,13 +1191,152 @@ void bmp_read()
 
 
   //
-  //	Seems more accurate of you read temperature first
+  //	Output Temperature and Pressure as NMEA sentences in case anyone is listening
   //
 
-  //temperature = (1.8 * bmp.readTemperature()) + 32 - 5.6;
-  //temperature = (1.8 * bmp.readTemperature()) + 32;
-  //pressure = bmp.readPressure() * 0.000295300;
+  //  NMEA tags _can_ be like this in the old version of the protocol:
+  //
+  // 	Barometer
+  //
+  //	  MMB 
+  //
+  // 	    $--MMB,x.x,I,y.y,B*hh<CR><LF>
+  //
+  //		x.x Barometric pressure, inches of mercury
+  // 		y.y Barometric pressure, bars
+  //
+  //    Air (Abmient) Temperature	
+  //
+  //	  MTA 
+  //
+  //        $--MTA,x.x,C*hh<CR><LF>
+  //
+  //	      x.x Temperature, degrees C
+  //
+  //
+  //  And there's the combined MDA, which does pressure and air temp (and a bunch of other things)	
+  //
+  //  But "right way" now is apparently XDR like this:
+  //
+  //    $IIXDR,C,24.24,C,ENV_OUTSIDE_T,P,100700,P,ENV_ATMOS_P,H,64.356,P,ENV_OUTSIDE_H*37
+  //           
+  //
 
+
+
+
+
+
+  //
+  //
+  //	So first the MTA Air Temperature
+  //
+  //
+
+  a_string = F("$FHMTA,");
+  append_float_to_string(a_string, temperature);
+  a_string += F(",F*");
+
+  byte_zero = 0;
+  for(i = a_string.indexOf('$') + 1; i < a_string.lastIndexOf('*'); i++)
+  {
+    byte_zero = byte_zero ^ a_string.charAt(i);
+  }
+  Serial2.print(a_string);   
+  a_string = String(byte_zero, HEX);
+  a_string.toUpperCase();
+  if(a_string.length() < 2)
+  {
+    Serial2.print("0");
+  }
+  Serial2.println(a_string);   
+
+
+
+  //
+  //
+  //	Now the MDA combined
+  //
+  //
+
+  a_string = F("$FHMDA,");
+  append_float_to_string(a_string, pressure);
+  a_string += F(",I,");
+  append_float_to_string(a_string, pressure * 0.03386388158);
+  a_string += F(",B,");
+  append_float_to_string(a_string, (temperature - 32.0) * (5.0 / 9.0));
+  a_string += F(",C,,,,,,,,,,,,,,*");
+
+  byte_zero = 0;
+  for(i = a_string.indexOf('$') + 1; i < a_string.lastIndexOf('*'); i++)
+  {
+    byte_zero = byte_zero ^ a_string.charAt(i);
+  }
+  Serial2.print(a_string);
+  a_string = String(byte_zero, HEX);
+  a_string.toUpperCase();
+  if(a_string.length() < 2)
+  {
+    Serial2.print("0");
+  }
+  Serial2.println(a_string);   
+
+  //
+  // 	Then the old school MMB for Air Pressure
+  //
+
+  a_string = F("$FHMMB,");
+  append_float_to_string(a_string, pressure);
+  a_string += F(",I,");
+  append_float_to_string(a_string, pressure * 0.03386388158);
+  a_string += F(",B*");
+
+  byte_zero = 0;
+  for(i = a_string.indexOf('$') + 1; i < a_string.lastIndexOf('*'); i++)
+  {
+    byte_zero = byte_zero ^ a_string.charAt(i);
+  }
+  Serial2.print(a_string);
+  a_string = String(byte_zero, HEX);
+  a_string.toUpperCase();
+  if(a_string.length() < 2)
+  {
+    Serial2.print("0");
+  }
+  Serial2.println(a_string);   
+
+  //
+  // 	Finally new school XDR (Type, Data, Units, ID)
+  //
+
+  a_string = F("$FHXDR,C,");
+  append_float_to_string(a_string, (temperature - 32.0) * (5.0 / 9.0));
+  a_string += F(",C,FHUB_TEMP,P,");
+  append_float_to_string(a_string, pressure * 0.03386388158);
+  a_string += F(",B,FHUB_BARO*");
+
+  byte_zero = 0;
+  for(i = a_string.indexOf('$') + 1; i < a_string.lastIndexOf('*'); i++)
+  {
+    byte_zero = byte_zero ^ a_string.charAt(i);
+  }
+  Serial2.print(a_string);
+  a_string = String(byte_zero, HEX);
+  a_string.toUpperCase();
+  if(a_string.length() < 2)
+  {
+    Serial2.print("0");
+  }
+  Serial2.println(a_string);   
+
+
+  //Serial2.println("$IIMMB,29.9870,I,1.012,B*46");
+
+
+
+  //Serial2.println("$IIXDR,P,1.0155,B,0*72");
+  //Serial2.println("$IIXDR,P,100700,P,ENV_ATMOS_P*01");
+  //Serial2.println("$IIXDR,C,24.24,C,ENV_OUTSIDE_T,P,100700,P,ENV_ATMOS_P,H,64.356,P,ENV_OUTSIDE_H*37");
 
 }
 
@@ -1466,7 +1607,7 @@ void push_out_nmea_sentence(bool from_nmea_in)
 
 bool validate_gps_buffer()
 {
-  String a_string;
+  //String a_string;
   byte_zero = 0;
   for(i = gps_read_buffer.indexOf('$') + 1; i < gps_read_buffer.lastIndexOf('*'); i++)
   {
@@ -1503,7 +1644,7 @@ bool validate_and_maybe_remediate_gps_buffer()
 
 bool validate_nmea_buffer()
 {
-  String a_string;
+  //String a_string;
   byte_zero = 0;
   for(i = nmea_read_buffer.indexOf('$') + 1; i < nmea_read_buffer.lastIndexOf('*'); i++)
   {
