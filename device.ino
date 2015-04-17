@@ -252,15 +252,20 @@ unsigned long wifi_read_previous_timestamp = 0;
 */
   
 bool currently_active = true;
-  
+
+
 /*
-  GPRS flags that describe current state of communication
+  Watchdog variables
 */
   
 long gprs_or_wifi_watchdog_timestamp = 0;
 int  gprs_or_wifi_watchdog_counter = 0;
+#define WATCHDOG_COUNTER_MAX	12
 
-
+/*
+  GPRS flags that describe current state of communication
+*/
+  
 #define	MAX_GPRS_READ_BUFFER	64
 
 #ifdef WIFI_NOT_CELL
@@ -521,7 +526,7 @@ void pat_the_watchdog()
   {  
     hardware_watchdog_timestamp = millis(); 
   }
-  else if(gprs_or_wifi_watchdog_counter < 10)
+  else if(gprs_or_wifi_watchdog_counter < WATCHDOG_COUNTER_MAX)
   {
     hardware_watchdog_timestamp = millis();   
   }
@@ -900,10 +905,10 @@ void read_eeprom_memory()
       //  Need to make note of time of most recent state stored in eeprom
       //
       
-      last_detailed_eeprom_write  = (unsigned int) EEPROM.read(DETAILED_STATE_START_LOCATION + (detailed_state_count * DETAILED_STATE_DATA_WIDTH) + 3);
-      last_detailed_eeprom_write += (unsigned int) EEPROM.read(DETAILED_STATE_START_LOCATION + (detailed_state_count * DETAILED_STATE_DATA_WIDTH) + 2) * 256;
-      last_detailed_eeprom_write += (unsigned int) EEPROM.read(DETAILED_STATE_START_LOCATION + (detailed_state_count * DETAILED_STATE_DATA_WIDTH) + 1) * 65536;
-      last_detailed_eeprom_write += (unsigned int) EEPROM.read(DETAILED_STATE_START_LOCATION + (detailed_state_count * DETAILED_STATE_DATA_WIDTH) + 0) * 16777216;
+      last_detailed_eeprom_write  = (unsigned int) EEPROM.read(DETAILED_STATE_START_LOCATION + ((detailed_state_count - 1) * DETAILED_STATE_DATA_WIDTH) + 3);
+      last_detailed_eeprom_write += (unsigned int) EEPROM.read(DETAILED_STATE_START_LOCATION + ((detailed_state_count - 1) * DETAILED_STATE_DATA_WIDTH) + 2) * 256;
+      last_detailed_eeprom_write += (unsigned int) EEPROM.read(DETAILED_STATE_START_LOCATION + ((detailed_state_count - 1) * DETAILED_STATE_DATA_WIDTH) + 1) * 65536;
+      last_detailed_eeprom_write += (unsigned int) EEPROM.read(DETAILED_STATE_START_LOCATION + ((detailed_state_count - 1) * DETAILED_STATE_DATA_WIDTH) + 0) * 16777216;
   }
   
   //
@@ -1131,12 +1136,12 @@ void bmp_read()
     float closest = abs(temperature_history[BARO_HISTORY_LENGTH - 1] - average);
     temperature = temperature_history[BARO_HISTORY_LENGTH - 1];
     #ifdef BARO_DEBUG_ON
-    debug_info("Pressure " + String(BARO_HISTORY_LENGTH) + ": ", temperature_history[BARO_HISTORY_LENGTH - 1]);
+    debug_info("Temperature " + String(BARO_HISTORY_LENGTH) + ": ", temperature_history[BARO_HISTORY_LENGTH - 1]);
     #endif
     for(int_one = BARO_HISTORY_LENGTH - 2; int_one >= 0; int_one--)
     {
       #ifdef BARO_DEBUG_ON
-      debug_info("Pressure " + String(int_one) + ": ", temperature_history[int_one]);
+      debug_info("Temperature " + String(int_one) + ": ", temperature_history[int_one]);
       #endif
       if(abs(temperature_history[int_one] - average) < closest)
       {
@@ -2010,8 +2015,7 @@ void pop_off_detailed_message()
 {
   latest_message_to_send = "";
   if(detailed_state_count < 1)
-  {
-    return;
+  {    return;
   }
   
   int which_location = DETAILED_STATE_START_LOCATION + (DETAILED_STATE_DATA_WIDTH * (detailed_state_count - 1));
