@@ -1238,7 +1238,7 @@ void bmp_read()
   //
   //
 
-  a_string = F("$FHMTA,");
+  a_string = F("$WIMTA,");
   append_float_to_string(a_string, temperature);
   a_string += F(",F*");
 
@@ -1264,7 +1264,7 @@ void bmp_read()
   //
   //
 
-  a_string = F("$FHMDA,");
+  a_string = F("$WIMDA,");
   append_float_to_string(a_string, pressure);
   a_string += F(",I,");
   append_float_to_string(a_string, pressure * 0.03386388158);
@@ -1290,7 +1290,7 @@ void bmp_read()
   // 	Then the old school MMB for Air Pressure
   //
 
-  a_string = F("$FHMMB,");
+  a_string = F("$WIMMB,");
   append_float_to_string(a_string, pressure);
   a_string += F(",I,");
   append_float_to_string(a_string, pressure * 0.03386388158);
@@ -1314,7 +1314,7 @@ void bmp_read()
   // 	Finally new school XDR (Type, Data, Units, ID)
   //
 
-  a_string = F("$FHXDR,C,");
+  a_string = F("$WIXDR,C,");
   append_float_to_string(a_string, (temperature - 32.0) * (5.0 / 9.0));
   a_string += F(",C,FHUB_TEMP,P,");
   append_float_to_string(a_string, pressure * 0.03386388158);
