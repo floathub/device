@@ -101,6 +101,7 @@
 //#define STRESS_MEMORY_ON
 //#define BYPASS_AES_ON
 //#define BARO_DEBUG_ON	
+#define ACTIVE_DEBUG_ON
 
 /*
   Anything which changes what the Floathub Data Receiver (fdr) needs to do
@@ -1500,10 +1501,16 @@ void parse_gps_buffer_as_rmc()
 
     if(distance > 0.0001)  //  1/10,000th of a degree is roughly 35 feet
     {
+      #ifdef ACTIVE_DEBUG_ON
+      debug_info(F("active: ON"));
+      #endif
       currently_active = true;
     }
     else
     {
+      #ifdef ACTIVE_DEBUG_ON
+      debug_info(F("active: OFF"));
+      #endif
       currently_active = false;
     }
 
@@ -1522,6 +1529,9 @@ void parse_gps_buffer_as_rmc()
   }
   else  
   {    
+      #ifdef ACTIVE_DEBUG_ON
+      debug_info(F("active: OFF BGPS"));
+      #endif
     currently_active = false;
   }
  
@@ -4139,6 +4149,16 @@ void loop()
   }
 
   /*
+    Update anything coming in on the nmea in port
+  */
+  
+  if(current_timestamp - nmea_previous_timestamp > nmea_update_interval)
+  {
+    nmea_previous_timestamp = current_timestamp;
+    update_nmea();
+  }
+  
+  /*
       Reporting routines
   */
   
@@ -4179,16 +4199,6 @@ void loop()
   {
     led_previous_timestamp = current_timestamp;
     update_leds();
-  }
-  
-  /*
-    Update anything coming in on the nmea in port
-  */
-  
-  if(current_timestamp - nmea_previous_timestamp > nmea_update_interval)
-  {
-    nmea_previous_timestamp = current_timestamp;
-    update_nmea();
   }
   
   
