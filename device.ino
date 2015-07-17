@@ -4,6 +4,10 @@
  (c) 2011-2014 Modiot Labs
  (begun June 6, 2011)
 
+  July, 2015
+
+  Simplified active to just use GPS SOG. Had NMEA values get nuked based on timestamp.
+
 
   March 26, 2014
 
@@ -101,7 +105,7 @@
 //#define STRESS_MEMORY_ON
 //#define BYPASS_AES_ON
 //#define BARO_DEBUG_ON	
-#define ACTIVE_DEBUG_ON
+//#define ACTIVE_DEBUG_ON
 
 /*
   Anything which changes what the Floathub Data Receiver (fdr) needs to do
@@ -164,7 +168,7 @@ byte cipher[MAX_AES_CIPHER_LENGTH];
 
 String        float_hub_id;			// default: outofbox
 String        float_hub_server;			// default: fdr.floathub.net
-unsigned int  float_hub_server_port;		// default: 44
+unsigned int  float_hub_server_port;		// default: 50003
 String        gprs_apn;				// default: apn.name
 String        gprs_username;			// default: username
 String        gprs_password;			// default: password
@@ -178,9 +182,11 @@ unsigned long last_detailed_eeprom_write;
   Status LED's
 */
 
-#define RED_LED	    9
-#define YELLOW_LED  8
-#define GREEN_LED   6
+#define COM_LED_1   6
+#define COM_LED_2   7
+
+#define GPS_LED_1   8
+#define GPS_LED_2   9
 
 /*
    Some global Strings, character arrays
@@ -230,7 +236,8 @@ unsigned long wifi_read_interval = 8000;           	//  Do wifi i/o communicatio
 unsigned long led_update_interval = 200;          	//  Update the LED's every 200 miliseconds
 unsigned long nmea_update_interval = 100;         	//  Update NMEA in serial line every 1/10 of a second
 unsigned long hardware_watchdog_interval = 120000; 	//  Do a hardware reset if we don't pat the dog every 2 minutes
-boolean green_led_state = false;         	  	//  For cycling on and off  
+unsigned long nmea_sample_interval = 30000;		//  Nuke nmea data older than 30 seconds
+boolean com_led_state = false;         	  		//  For cycling on and off  
   
 unsigned long sensor_previous_timestamp = 0;
 unsigned long gps_previous_timestamp = 0;
@@ -246,7 +253,11 @@ unsigned long nmea_previous_timestamp = 0;
 unsigned long hardware_watchdog_timestamp = 0;
 unsigned long wifi_scan_previous_timestamp = 0;
 unsigned long wifi_read_previous_timestamp = 0;  
-
+unsigned long nmea_speed_water_timestamp = 0;
+unsigned long nmea_depth_water_timestamp = 0;
+unsigned long nmea_wind_speed_timestamp = 0;
+unsigned long nmea_wind_direction_timestamp = 0;
+unsigned long nmea_water_temperature_timestamp = 0;
 
 /*
   Is the device currently "active" (i.e. is the vessel in movement and sending high frequency updates)?
@@ -356,14 +367,6 @@ String         gps_siv = "";          //  Number of satellites in view
 String         gps_hdp = "";          //  Horizontal dillution of precision (how good is our fix)
 String         gps_altitude = "";     //  We should be able to build a tide table out of this.
 
-/*
-  We keep a running average of position to do a little pythagorean calculation to tell if we're moving or not
-*/
-
-#define LOCATION_HISTORY_LENGTH 5
-
-float           latitude_history[LOCATION_HISTORY_LENGTH];
-float          longitude_history[LOCATION_HISTORY_LENGTH];
 
 /*
   Global variables for battery banks/chargers/pumps
@@ -380,6 +383,7 @@ float  charger_three;
 pump_state pump_one_state = off;
 pump_state pump_two_state = off;
 pump_state pump_three_state = off;
+
 
 /*
   Global variables for NMEA data
@@ -608,11 +612,11 @@ void init_eeprom_memory()
   EEPROM.write(40, '\0');
   
   //
-  //  Set default port
+  //  Set default port of 50003
   //
   
-  EEPROM.write(80, 0);
-  EEPROM.write(81, 44);
+  EEPROM.write(80, 195);
+  EEPROM.write(81, 83);
   
   //
   //  set default gprs apn / wireless network name
@@ -967,23 +971,18 @@ void setup()
   randomSeed(analogRead(0));
   
   //
-  //	We have no location history
+  //  Setup LED pins, initial is red on both
   //
   
-  for(i = 0; i < LOCATION_HISTORY_LENGTH; i++)
-  {
-    latitude_history[i] = 0.0;
-    longitude_history[i] = 0.0;
-  } 
-  
-  //
-  //  Setup LED pins, Red always on to show power
-  //
-  
-  pinMode(RED_LED, OUTPUT);
-  pinMode(YELLOW_LED, OUTPUT);
-  pinMode(GREEN_LED, OUTPUT);
-  digitalWrite(RED_LED, HIGH);
+  pinMode(GPS_LED_1, OUTPUT);
+  pinMode(GPS_LED_2, OUTPUT);
+  pinMode(COM_LED_1, OUTPUT);
+  pinMode(COM_LED_2, OUTPUT);
+
+  digitalWrite(GPS_LED_1, HIGH);
+  digitalWrite(GPS_LED_2, LOW);
+  digitalWrite(COM_LED_1, HIGH);
+  digitalWrite(COM_LED_2, LOW);
 
 
   //
@@ -1456,50 +1455,19 @@ void parse_gps_buffer_as_rmc()
   {
     gps_sog  = gps_read_buffer.substring(sog_start + 1, tmg_start);
     gps_bearing_true  = gps_read_buffer.substring(tmg_start + 1, date_start);
- 
+
+    //
+    //   Use speed over gound to figure out if active. Used to have some
+    // really complicated math in here for running average of latitude and
+    // longitude, but this is far simpler and seems more reliable
+    //
+
     memset(temp_string, 0, 20 * sizeof(char));
-    gps_latitude.substring(0,2).toCharArray(temp_string, 3);
-    int_one = atoi(temp_string);
+    gps_sog.substring(0,gps_sog.length()).toCharArray(temp_string, 19);
+    float_one = atof(temp_string);
   
-    memset(temp_string, 0, 20 * sizeof(char));
-    gps_latitude.substring(3,11).toCharArray(temp_string, 9);
-    float_one = atof(temp_string);
-    
-    float current_latitude = int_one + (float_one / 60.0);
-    
-    memset(temp_string, 0, 20 * sizeof(char));
-    gps_longitude.substring(0,3).toCharArray(temp_string, 4);
-    int_one = atoi(temp_string);
-
-    memset(temp_string, 0, 20 * sizeof(char));
-    gps_longitude.substring(4,12).toCharArray(temp_string, 9);
-    float_one = atof(temp_string);
-
-    float current_longitude = int_one + (float_one / 60.0);
-    
-    
-    //
-    //  Calculate average of past positions
-    //
-    
-    float average_latitude = 0.0;
-    float average_longitude = 0.0;
-    for(i = 0; i < LOCATION_HISTORY_LENGTH; i++)
-    {
-      average_latitude += latitude_history[i];
-      average_longitude += longitude_history[i];
-    }
-    
-    average_latitude = average_latitude / ((float) LOCATION_HISTORY_LENGTH);
-    average_longitude = average_longitude / ((float) LOCATION_HISTORY_LENGTH);
-    
-    //
-    //  Find pythagorean distance from average
-    //
-    
-    float distance = sqrt(pow(average_latitude - current_latitude, 2) + pow(average_longitude - current_longitude, 2));
-
-    if(distance > 0.0001)  //  1/10,000th of a degree is roughly 35 feet
+    //if(float_one > 0.0)  //  Always active for debugging
+    if(float_one > 0.25)  //  Moving faster than a 1/4 knot?
     {
       #ifdef ACTIVE_DEBUG_ON
       debug_info(F("active: ON"));
@@ -1513,28 +1481,14 @@ void parse_gps_buffer_as_rmc()
       #endif
       currently_active = false;
     }
-
-
-    //
-    //  Slide averages
-    //
-    
-    for(i = 0; i < LOCATION_HISTORY_LENGTH - 1; i++)
-    {
-      latitude_history[i] = latitude_history[i + 1];
-      longitude_history[i] = longitude_history[i + 1];
-    }
-    latitude_history[LOCATION_HISTORY_LENGTH - 1] = current_latitude;
-    longitude_history[LOCATION_HISTORY_LENGTH - 1] = current_longitude;
   }
   else  
   {    
-      #ifdef ACTIVE_DEBUG_ON
-      debug_info(F("active: OFF BGPS"));
-      #endif
+    #ifdef ACTIVE_DEBUG_ON
+    debug_info(F("active: OFF BGPS"));
+    #endif
     currently_active = false;
   }
- 
 }
 
 void parse_gps_buffer_as_gga()
@@ -1767,6 +1721,9 @@ void add_timestamp_to_string(String &the_string)
 void individual_pump_read(int pump_number, pump_state &state, int analog_input)
 {
   float pump_value = analogRead(analog_input) / 37.213;
+  #ifdef PUMP_DEBUG_ON
+  debug_info("Pump " + String(pump_number) + " on input " + String(analog_input) + " reads ", pump_value);
+  #endif
   if(pump_value > 2.0)
   {
      if(state == unknown)
@@ -2420,10 +2377,12 @@ void pop_off_message_queue()
  
   if(detailed_state_count > pump_state_count)
   {
+    debug_info(F("ATSL: d"));
     pop_off_detailed_message();    
   }
   else
   {
+    debug_info(F("ATSL: p"));
     pop_off_pump_message();
   }
 }
@@ -2884,8 +2843,10 @@ bool push_latest_message_out_socket(void)
   plain[1] = '\n';
   if(cc3000_client.write(plain, 2) != 2)
   {
+    debug_info(F("ATSL: \r\n fail"));
     return false;
   }
+  debug_info(F("ATSL: \r\n good"));
   return true;
 }
 
@@ -2912,6 +2873,21 @@ bool displayConnectionDetails(void)
   }
 }
 */
+
+void ATSL_debug_out_latest_message_send()
+{
+    Serial.println(F("ATSL start"));
+    for(i = 0; i < latest_message_to_send.length(); i = i + 1)
+    {
+      Serial.print(latest_message_to_send.charAt(i));
+    } 
+    Serial.println();
+    Serial.println(F("ATSL end"));
+}
+
+
+
+
 
 void wifi_read()
 {
@@ -2952,6 +2928,8 @@ void wifi_read()
     {
       if(open_fdr())
       {
+        debug_info("ATSLL: ", (int) latest_message_to_send.length());
+        ATSL_debug_out_latest_message_send();
         if(push_latest_message_out_socket())
         {
           #ifdef WIFI_DEBUG_ON
@@ -2995,6 +2973,8 @@ void wifi_read()
       pop_off_message_queue();
       if(latest_message_to_send.length() > 0)
       {
+        debug_info("ATSLL: ", (int) latest_message_to_send.length());
+        ATSL_debug_out_latest_message_send();
         if(push_latest_message_out_socket())
         {
           #ifdef WIFI_DEBUG_ON
@@ -3764,43 +3744,50 @@ void update_leds()
 
   if(gps_valid)
   {
-    digitalWrite(YELLOW_LED, HIGH);
+    digitalWrite(GPS_LED_1, LOW);
+    digitalWrite(GPS_LED_2, HIGH);
   }
   else
   {
-    digitalWrite(YELLOW_LED, LOW);
+    digitalWrite(GPS_LED_1, HIGH);
+    digitalWrite(GPS_LED_2, LOW);
   }
 
   if(gprs_or_wifi_communications_on == false)
   {
-    digitalWrite(GREEN_LED, LOW);
+    digitalWrite(COM_LED_1, HIGH);
+    digitalWrite(COM_LED_2, LOW);
     return;
   } 
 
   #ifdef WIFI_NOT_CELL
-  if(cc3000.getStatus() == STATUS_CONNECTED)
+  if(cc3000.getStatus() == STATUS_CONNECTED && cc3000.checkDHCP())
   {
     if(wifi_communication_state == idle)
     {
-      digitalWrite(GREEN_LED, HIGH);
+      digitalWrite(COM_LED_1, LOW);
+      digitalWrite(COM_LED_2, HIGH);
     }
     else
     {
-      if(green_led_state == true)
+      if(com_led_state == true)
       {
-        digitalWrite(GREEN_LED, LOW);
-        green_led_state = false;
+        digitalWrite(COM_LED_1, LOW);
+        digitalWrite(COM_LED_2, HIGH);
+        com_led_state = false;
       }
       else
       {
-        digitalWrite(GREEN_LED, HIGH);
-        green_led_state = true;
+        digitalWrite(COM_LED_1, LOW);
+        digitalWrite(COM_LED_2, LOW);
+        com_led_state = true;
       }
     }
   }
   else
   {
-    digitalWrite(GREEN_LED, LOW);
+        digitalWrite(COM_LED_1, HIGH);
+        digitalWrite(COM_LED_2, LOW);
   }
   #else
 
@@ -3812,25 +3799,29 @@ void update_leds()
   {
     if(gprs_communication_state == idle)
     {
-      digitalWrite(GREEN_LED, HIGH);
+        digitalWrite(COM_LED_1, LOW);
+        digitalWrite(COM_LED_2, HIGH);
     }
     else
     {
-      if(green_led_state == true)
+      if(com_led_state == true)
       {
-        digitalWrite(GREEN_LED, LOW);
-        green_led_state = false;
+        digitalWrite(COM_LED_1, LOW);
+        digitalWrite(COM_LED_2, HIGH);
+        com_led_state = false;
       }
       else
       {
-        digitalWrite(GREEN_LED, HIGH);
-        green_led_state = true;
+        digitalWrite(COM_LED_1, LOW);
+        digitalWrite(COM_LED_2, LOW);
+        com_led_state = true;
       }
     }
   }
   else
   {
-    digitalWrite(GREEN_LED, LOW);
+        digitalWrite(COM_LED_1, HIGH);
+        digitalWrite(COM_LED_2, LOW);
   }
   #endif
 }
@@ -3897,6 +3888,7 @@ void parse_nmea_sentence()
     #ifdef NMEA_DEBUG_ON
     debug_info("NMEA d water:", nmea_depth_water);
     #endif    
+    nmea_depth_water_timestamp = millis();
   }
 
   //
@@ -3909,6 +3901,7 @@ void parse_nmea_sentence()
     #ifdef NMEA_DEBUG_ON
     debug_info("NMEA w temp:", nmea_water_temperature);
     #endif    
+    nmea_water_temperature_timestamp = millis();
   }
 
   //
@@ -3920,6 +3913,7 @@ void parse_nmea_sentence()
     #ifdef NMEA_DEBUG_ON
     debug_info("NMEA s water:", nmea_speed_water);
     #endif    
+    nmea_speed_water_timestamp = millis();
   }
   
   //
@@ -3931,11 +3925,13 @@ void parse_nmea_sentence()
     #ifdef NMEA_DEBUG_ON
     debug_info("NMEA w speed:", nmea_wind_speed);
     #endif
+    nmea_wind_speed_timestamp = millis();
     if(	popout_nmea_value("MWV", commas[0], commas[1], nmea_wind_direction))
     {
       #ifdef NMEA_DEBUG_ON
       debug_info("NMEA w direction:", nmea_wind_direction);
       #endif
+      nmea_wind_direction_timestamp = millis();
     }
   }
 }
@@ -4074,15 +4070,29 @@ void zero_nmea_values()
 {
   //
   //	Can't have nmea values persisting long after they were read, so this
-  //	is called to nuke them after a console report
+  //	is called to nuke them if they are stale more than 30 seconds
   //
-  
-  nmea_speed_water = -1.0;
-  nmea_depth_water = -1.0;
-  nmea_wind_speed = -1.0;
-  nmea_wind_direction = -1.0;
-  nmea_water_temperature = -1.0;
-  
+   
+  if(millis() - nmea_speed_water_timestamp > nmea_sample_interval)
+  {
+    nmea_speed_water = -1.0;
+  }
+  if(millis() - nmea_depth_water_timestamp > nmea_sample_interval)
+  {
+    nmea_depth_water = -1.0;
+  }
+  if(millis() - nmea_wind_speed_timestamp > nmea_sample_interval)
+  {
+    nmea_wind_speed = -1.0;
+  }
+  if(millis() - nmea_wind_direction_timestamp > nmea_sample_interval)
+  {
+    nmea_wind_direction = -1.0;
+  }
+  if(millis() - nmea_water_temperature_timestamp > nmea_sample_interval)
+  {
+    nmea_water_temperature = -1.0;
+  }
 }
 
 
@@ -4204,13 +4214,15 @@ void loop()
   
   
   #ifdef EXECUTION_PATH_DEBUG_ON
-  if(random(0,100) < 10)
+  if(random(0,100) < 50)
   {
-    digitalWrite(RED_LED, HIGH);
+    digitalWrite(GPS_LED_1, HIGH);
+    digitalWrite(GPS_LED_2, LOW);
   }
   else
   {
-    digitalWrite(RED_LED, LOW);
+    digitalWrite(GPS_LED_1, LOW);
+    digitalWrite(GPS_LED_2, HIGH);
   }
   #endif
 }
