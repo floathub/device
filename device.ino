@@ -4,6 +4,13 @@
  (c) 2011-2014 Modiot Labs
  (begun June 6, 2011)
 
+  January, 2016
+
+  Fairly massive rewrite to move GPS to I2C and embed an ESP8266 as main
+  comm/configuration channel, thereby also ending up with a NMEA WiFi
+  multiplexor. 
+
+
   July, 2015
 
   Simplified active to just use GPS SOG. Had NMEA values get nuked based on timestamp.
@@ -76,14 +83,14 @@
  
 */
 
-#include <Adafruit_CC3000.h>
+//#include <Adafruit_CC3000.h>
 #include <Wire.h>
-#include <Adafruit_BMP085.h>
+#include "./libs/Adafruit_BMP/Adafruit_BMP085.h"
 #include <EEPROM.h>
 #include <stdio.h>
-#include <Time.h>
-#include <AES.h>
-#include <Base64.h>
+#include "./libs/Time/Time.h"
+#include "./libs/AES/AES.h"
+#include "./libs/Base64/Base64.h"
 #include <avr/wdt.h>
 #include <util/crc16.h>
 #include <SPI.h>
@@ -94,8 +101,8 @@
   Compile time option/debug flags
 */
 
-#define   WIFI_NOT_CELL
-#define WIFI_DEBUG_ON
+//#define   WIFI_NOT_CELL
+//#define WIFI_DEBUG_ON
 //#define GPRS_DEBUG_ON
 //#define GPS_DEBUG_ON
 //#define PUMP_DEBUG_ON
@@ -104,7 +111,7 @@
 //#define DEBUG_MEMORY_ON
 //#define STRESS_MEMORY_ON
 //#define BYPASS_AES_ON
-//#define BARO_DEBUG_ON	
+#define BARO_DEBUG_ON	
 //#define ACTIVE_DEBUG_ON
 
 /*
