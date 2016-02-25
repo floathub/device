@@ -1,5 +1,9 @@
-fhcore
-======
+device.ino
+==========
 
 Core arduino code providing floathub functionality. See floathub.com for
 more information.
+
+
+Note that the esp8266 directory contains separate code that is to be flashed
+to the onboard esp8266.

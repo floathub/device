@@ -1,7 +1,7 @@
 /*
 
  FloatHub Arduino Code
- (c) 2011-2014 Modiot Labs
+ (c) 2011-2016 Modiot Labs
  (begun June 6, 2011)
 
   January, 2016
@@ -104,14 +104,14 @@
 //#define   WIFI_NOT_CELL
 //#define WIFI_DEBUG_ON
 //#define GPRS_DEBUG_ON
-//#define GPS_DEBUG_ON
+#define GPS_DEBUG_ON
 //#define PUMP_DEBUG_ON
 //#define EXECUTION_PATH_DEBUG_ON
 //#define NMEA_DEBUG_ON
 //#define DEBUG_MEMORY_ON
 //#define STRESS_MEMORY_ON
 //#define BYPASS_AES_ON
-#define BARO_DEBUG_ON	
+//#define BARO_DEBUG_ON	
 //#define ACTIVE_DEBUG_ON
 
 /*
@@ -128,6 +128,12 @@
 #define  FLOATHUB_MODEL_DESCRIPTION "FC7-1.1"
 #endif
 
+
+/*
+   i2c device(s) address(es)
+*/
+
+#define GPS_I2C_ADDRESS 0x42
 
 /*
   Adafruit CC3000 wireless library settings
@@ -429,6 +435,23 @@ void print_free_memory()
 }
 #endif
 
+
+/*
+   Push a char* buffer out i2c to a given device 
+*/
+
+void push_charbuf_to_i2c( char *charbuf, int length, int device_address)
+{
+    Wire.beginTransmission(device_address);
+    for(int i = 0; i < length; i++)
+    {
+      Wire.write(charbuf[i]);
+    }    
+    Wire.endTransmission();
+}
+
+
+
 /*
     Setup for barometric and temperature
 */
@@ -450,11 +473,11 @@ void gps_setup()
   //  Setup gps on serial device 3, and make it send only GGA and RMC NMEA sentences
   //
 
-  Serial3.begin(9600);
-  delay(1000);
+  // Serial3.begin(9600);
+  // delay(1000);
 
   //
-  //	Older GPS
+  //	Really Old GPS
   //
 
   /*
@@ -469,15 +492,45 @@ void gps_setup()
   */
   
   //
+  //	Old GPS on Serial 
   //	MTK3339 / Ultimate GPS breakout from Adafruit
   //
   
+  /*
   //Serial3.println("$PMTK314,0,2,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0*28");	// Every 2 seconds
   //Serial3.println("$PMTK314,0,3,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0*2A");		// GGA every 1 second, RMC every 3
   //Serial3.println("$PMTK314,0,3,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0*29");		// GGA every 2 second, RMC every 3
   //Serial3.println("$PMTK314,0,5,0,3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0*2E");		// GGA every 3 second, RMC every 5
   Serial3.println("$PMTK314,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0*28");		// GGA & RMC every second
   //Serial3.println("$PMTK314,0,2,0,3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0*29");		// GGA every 3 second, RMC every 2
+  */
+  
+
+  //
+  // GPS on I2C
+  //
+
+  Wire.begin();
+ 
+  delay(1000);
+ 
+  //
+  // Mess with the uBlox
+  //
+ 
+ 
+  char turn_off[30] = "$PUBX,40,GSV,0,0,0,0,0,0*59\r\n";
+  push_charbuf_to_i2c(turn_off, 29, GPS_I2C_ADDRESS);
+
+  strcpy(turn_off, "$PUBX,40,GSA,0,0,0,0,0,0*4E\r\n");
+  push_charbuf_to_i2c(turn_off, 29, GPS_I2C_ADDRESS);
+
+  strcpy(turn_off, "$PUBX,40,GLL,0,0,0,0,0,0*5C\r\n");
+  push_charbuf_to_i2c(turn_off, 29, GPS_I2C_ADDRESS);
+  
+  strcpy(turn_off, "$PUBX,40,VTG,0,0,0,0,0,0*5E\r\n");
+  push_charbuf_to_i2c(turn_off, 29, GPS_I2C_ADDRESS);
+
 }
 
 
@@ -1613,7 +1666,6 @@ bool validate_and_maybe_remediate_gps_buffer()
   {
     gps_read_buffer = gps_read_buffer.substring(gps_read_buffer.lastIndexOf('$')); 
     return validate_gps_buffer();  
-    return validate_gps_buffer();  
   }
   return false;
 }
@@ -1641,43 +1693,55 @@ bool validate_nmea_buffer()
 
 void gps_read()
 {
-  while(Serial3.available() && (int) gps_read_buffer.length() < MAX_GPS_BUFFER)
+
+  Wire.beginTransmission(GPS_I2C_ADDRESS); 
+  Wire.write(0xfd); //Address on device to begin reading from
+  Wire.endTransmission();
+
+  Wire.requestFrom(GPS_I2C_ADDRESS,32);
+  while(Wire.available() && (int) gps_read_buffer.length() < MAX_GPS_BUFFER)
   {
-     int incoming_byte = Serial3.read();
-     if(incoming_byte == '\n')
-     {
-       if(validate_and_maybe_remediate_gps_buffer())
-       {
-         if(gps_read_buffer.indexOf("$GPRMC,") == 0)
-         {
-           #ifdef GPS_DEBUG_ON
-           debug_info(F("--GPS BUF RMC--"));
-           debug_info(gps_read_buffer);
-           #endif
-           push_out_nmea_sentence(false);
-           parse_gps_buffer_as_rmc();
-         }
-         else if(gps_read_buffer.indexOf("$GPGGA,") == 0)
-         {
-           #ifdef GPS_DEBUG_ON
-           debug_info(F("--GPS BUF GGA--"));
-           debug_info(gps_read_buffer);
-           #endif
-           push_out_nmea_sentence(false);
-           parse_gps_buffer_as_gga();
+    int incoming_byte = Wire.read();
+    if(incoming_byte < 0xff)
+    {
+      if(incoming_byte == '\n')
+      {
+        if(validate_and_maybe_remediate_gps_buffer())
+        {
+          if(gps_read_buffer.indexOf("$GPRMC,") == 0)
+          {
+            #ifdef GPS_DEBUG_ON
+            debug_info(F("--GPS BUF RMC--"));
+            debug_info(gps_read_buffer);
+            #endif
+            push_out_nmea_sentence(false);
+            parse_gps_buffer_as_rmc();
           }
-       }
-       gps_read_buffer = "";
-     }
-     else if (incoming_byte == '\r')
-     {
-       // don't do anything
-     }
-     else
-     {
-       gps_read_buffer += String((char) incoming_byte);
-     }
+          else if(gps_read_buffer.indexOf("$GPGGA,") == 0)
+          {
+            #ifdef GPS_DEBUG_ON
+            debug_info(F("--GPS BUF GGA--"));
+            debug_info(gps_read_buffer);
+            #endif
+            push_out_nmea_sentence(false);
+            parse_gps_buffer_as_gga();
+          }
+        }
+        gps_read_buffer = "";
+      }
+      else if (incoming_byte == '\r')
+      {
+        // don't do anything
+      }
+      else
+      {
+        gps_read_buffer += String((char) incoming_byte);
+      }
+    }
   }
+
+  Wire.endTransmission(); 
+
   if((int) gps_read_buffer.length() >= MAX_GPS_BUFFER - 1 )
   {
     #ifdef GPS_DEBUG_ON
