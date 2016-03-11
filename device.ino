@@ -235,7 +235,7 @@ bool gprs_or_wifi_communications_on = true;
 */
 
 unsigned long sensor_sample_interval = 10000;     	//  Check temperature, pressure, every 10 seconds
-unsigned long gps_interval = 50;                  	//  Read GPS serial every 1/20 second
+unsigned long gps_interval = 25;                  	//  Read GPS serial every 1/20 second
 unsigned long voltage_interval = 5000;            	//  Check batteries/chargers every 5 second
 unsigned long gprs_interval = 500;                	//  Check GPRS every 500 milliseconds
 unsigned long pump_interval = 1200;               	//  Check pump state every 1.2 seconds
@@ -1014,7 +1014,7 @@ void setup()
   //  Setup main serial port for local data monitoring
   //
   
-  Serial.begin(9600);
+  Serial.begin(115200);
   delay(200);
   
   //
@@ -1735,7 +1735,16 @@ void gps_read()
       }
       else
       {
-        gps_read_buffer += String((char) incoming_byte);
+//        if(incoming_byte < 20 || incoming_byte > 128)
+//        {
+//          Serial.print("Weird ass fisking GPS character: ");
+//          Serial.println(incoming_byte, HEX);
+//        }
+//        if(incoming_byte > 31 && incoming_byte < 127)
+        if(incoming_byte > 31)
+        {
+          gps_read_buffer += String((char) incoming_byte);
+        }
       }
     }
   }
