@@ -76,13 +76,26 @@ IPAddress public_static_mask;
 IPAddress public_static_dns;
 
 
-//	Account Related - Note that the definitive source for these is the Mega, _not_ the esp8266
+//	Account Related 
 
 String        float_hub_id;			// default: outofbox
+byte          float_hub_aes_key[16]; 
+
+//	Other Settings
+
+bool	nmea_mux_on;				// default: yes
+unsigned int  nmea_mux_port;			// default: 2319
+String	web_interface_username;			// default: floathub
+String	web_interface_password;			// default: floathub
+
+
+//	Advanced (hidden) settings
+
+bool	      phone_home_on;
 String        float_hub_server;			// default: fdr.floathub.net
 unsigned int  float_hub_server_port;		// default: 50003
-unsigned int  multiplexer_port;			// default: 2319
-byte          float_hub_aes_key[16]; 
+bool	      virtual_serial_on;		// default: no
+unsigned int  virtual_serial_port;		// default: 1923
 
 
 //
@@ -121,24 +134,6 @@ void debug_out(String message)
 }
 
 
-
-void printCookies()
-{
-/*
-  for(int i=0; i < MAX_COOKIES; i++)
-  {
-    Serial.print("Cookie " + String(i) + ": ip=");
-    Serial.print(cookies[i].address);
-    Serial.print(", rand=");
-    Serial.print(cookies[i].random_number);
-    Serial.print(", time=");
-    Serial.print(cookies[i].time);
-    Serial.print(", valid=");
-    Serial.println(cookies[i].valid);
-  }
-*/
-}
-
 void nukeCookie(int which_one)
 {
   if(which_one >= MAX_COOKIES)
@@ -157,12 +152,9 @@ void nukeCookie(int which_one)
 
 bool isAuthenticated()
 {
-//  Serial.println("Enter isAuthenticated()");
   if (web_server.hasHeader("Cookie"))
   {   
-//    Serial.print("Found cookie: ");
     String cookie = web_server.header("Cookie");
-//    Serial.println(cookie);
     int cut_spot = cookie.indexOf("FHSESSION=");
     if (cut_spot != -1)
     {
@@ -175,11 +167,6 @@ bool isAuthenticated()
       WiFiClient client = web_server.client();
       for(int i =0 ; i < MAX_COOKIES; i++)
       {
-//	 Serial.print("Comparing \"");
-//         Serial.print(cookie.substring(cut_spot));
-//         Serial.print("\" to \"");
-//         Serial.print(cookies[i].random_number);
-//         Serial.println("\"");
          if( cookie.substring(cut_spot) == String(cookies[i].random_number) &&
              cookies[i].valid == true &&
              client.remoteIP() == cookies[i].address
@@ -190,14 +177,13 @@ bool isAuthenticated()
            //
           
            cookies[i].time = millis();
-           Serial.println("Yay, cookie hit");
+           debug_out(F("Yay, cookie hit"));
            return true;
          }
       }
-      Serial.println("Cut spot was there, but no cookie matched");
     }
   }
-  Serial.println("Authentication Failed");
+  debug_out(F("Authentication Failed"));
   return false;	
 }
 
@@ -224,6 +210,18 @@ void spitOutIPInput(String &page, String name_stub, String label, const IPAddres
   page += "<br/>";
 }
 
+void checkPort(unsigned int &the_port)
+{
+  if(the_port > 65535)
+  {
+    the_port = 65535;
+  }
+  if(the_port < 1)
+  {
+    the_port = 1; 
+  }
+}
+
 
 void sendPleaseWait(String where_to_go)
 {
@@ -233,7 +231,6 @@ void sendPleaseWait(String where_to_go)
   page += FPSTR(HTTP_TITLE);
   page += FPSTR(HTTP_STYLE);
   page += FPSTR(HTTP_DIV_A);
-//  page += FPSTR(HTTP_LOGOA);
   page += FPSTR(HTTP_DIV_B);
   page += "<h2>Please Wait</h2>";
   page += "<p style='margin: 20px;'>Update in progress. Will attempt to redirect you in a few seconds ...</p>";
@@ -249,16 +246,19 @@ void handleLogin()
 {
 
 
-  Serial.println("Enter handleLogin()");
+  debug_out(F("Enter handleLogin()"));
 
+/*
   if (web_server.hasHeader("Cookie"))
   {   
     Serial.print("Found cookie: ");
     String cookie = web_server.header("Cookie");
     Serial.println(cookie);
   }
-  if (web_server.hasArg("DISCONNECT")){
-    Serial.println("Disconnection");
+*/
+  if (web_server.hasArg("DISCONNECT"))
+  {
+    debug_out(F("Disconnection"));
     String header = "HTTP/1.1 301 OK\r\nSet-Cookie: FHSESSION=0\r\nLocation: /login\r\nCache-Control: no-cache\r\n\r\n";
     web_server.sendContent(header);
     return;
@@ -267,13 +267,12 @@ void handleLogin()
   {
       String header = "HTTP/1.1 301 OK\r\nLocation: /\r\nCache-Control: no-cache\r\n\r\n";
       web_server.sendContent(header);
-      Serial.println("redirect already logged in");
+      debug_out(F("redirect already logged in"));
       return;
   }
   if (web_server.hasArg("USER") && web_server.hasArg("PASS"))
   {
-    Serial.println("Well, made it this far");
-    if (web_server.arg("USER") == "admin" &&  web_server.arg("PASS") == "admin" )
+    if (web_server.arg("USER") == web_interface_username &&  web_server.arg("PASS") == web_interface_password )
     {
 
       //
@@ -291,10 +290,6 @@ void handleLogin()
 	}
       }
 
-      Serial.print("Going to set cookie ");
-      Serial.println(cookie_to_use);
-
-
       WiFiClient client = web_server.client();
 
       cookies[cookie_to_use].valid = true;
@@ -302,27 +297,17 @@ void handleLogin()
       cookies[cookie_to_use].address = client.remoteIP();
       cookies[cookie_to_use].random_number = random(1000000,10000000);
 
-      printCookies();
-
       String header = "HTTP/1.1 301 OK\r\nSet-Cookie: FHSESSION=" + String(cookies[cookie_to_use].random_number) + "\r\nLocation: /\r\nCache-Control: no-cache\r\n\r\n";
       web_server.sendContent(header);
-      Serial.println("Log in Successful");
+      debug_out("Log in Successful");
       return;
     }
   }
 
 
   //
-  //  Guess we need to show login page
+  //  Guess we need to show the login page
   //
-
-
-  char temp[800];
-  int sec = millis() / 1000;
-  int min = sec / 60;
-  int hr = min / 60;
-
-
 
   String page = FPSTR(HTTP_INITA);
   page += FPSTR(HTTP_TITLE);
@@ -349,21 +334,15 @@ void handleRoot()
 {
 
 
-  Serial.println("Enter handleRoot()");
+  debug_out(F("Enter handleRoot()"));
   if(!isAuthenticated())
   {
     web_server.sendContent(FPSTR(HTTP_REDIRECT));
     return;
   }
 
-  char temp[800];
-  int sec = millis() / 1000;
-  int min = sec / 60;
-  int hr = min / 60;
-
   WiFiClient client = web_server.client();
-  Serial.print("I think see a request from ");
-  Serial.println(client.remoteIP());
+  debug_out("Request from " + client.remoteIP());
 
 
   String page = FPSTR(HTTP_INITA);
@@ -424,7 +403,7 @@ void handlePrivateWireless()
 {
 
 
-  Serial.println("Enter handlePrivateWireless()");
+  debug_out(F("Enter handlePrivateWireless()"));
   if(!isAuthenticated())
   {
     web_server.sendContent(FPSTR(HTTP_REDIRECT));
@@ -448,65 +427,29 @@ void handlePrivateWireless()
     //  What is submitted ssid and password; do something only if it has changed
     //
 
-    Serial.print("I see the new private ssid as");
-    Serial.println(web_server.arg("privssid"));
-
-/*
-    if(web_server.arg("pubpassone") == web_server.arg("pubpasstwo"))
+    if(web_server.arg("privpassone") == web_server.arg("privpasstwo"))
     { 
-      Serial.println("The passwords do match");
-      if(web_server.arg("pubssid").length() < 1 )
+      if(web_server.arg("privssid").length() < 1 )
       {
         error_message += "Network Name cannot be blank.";
       }
+      else if(web_server.arg("privpassone").length() < 8) 
+      {
+	error_message += "Password must be 8+ characters";
+      }
       else
       {
-        if(web_server.arg("pubadd") == "dynamic")
-        {
-          // Set Public Wireless for DHCP
-          public_wifi_ssid = web_server.arg("pubssid");
-          public_wifi_password = web_server.arg("pubpassone");
-          
-          sendPleaseWait("/public");
-
-          WiFi.disconnect();
-          WiFi.mode(WIFI_OFF);
-          WiFi.mode(WIFI_AP_STA);
-          WiFi.begin(public_wifi_ssid.c_str(), public_wifi_password.c_str());
-          byte attempts = 0; 
-          while (WiFi.status() != WL_CONNECTED && attempts < 24)
-          {
-            Serial.print(".");
-            delay(500);
-            attempts++;
-          }
-          attempts = 0;
-          while((!MDNS.begin (mdns_name.c_str(), WiFi.localIP())) && attempts < 12)
-          {
-            debug_out("MDNS died off ... will retry");
-            delay(500);
-            attempts++;
-            if(attempts >= 12)
-            {
-              debug_out("Can't get MDNS up at all");
-            }
-         }
-
-
-
-          return;
-        }
-        else
-        {
-          // Set Public Wireless for Static 
-        }
+        sendPleaseWait("/private");
+        private_wifi_ssid = web_server.arg("privssid");
+        private_wifi_password = web_server.arg("privpassone");
+        WiFi.softAP(private_wifi_ssid.c_str(), private_wifi_password.c_str());
       }
     }
     else
     {
       error_message += "The passwords do not match";
     }
-*/
+
   }
 
   String page = FPSTR(HTTP_INITA);
@@ -516,6 +459,7 @@ void handlePrivateWireless()
   page += FPSTR(HTTP_LOGOA);
   page += FPSTR(HTTP_DIV_B);
   page += "<h2>Private Wireless Network</h2>";
+  page += "<h4>" + error_message + "</h4>";
 
   page += "<form method='post' action='/private'>";
   page += "<label for='privssid'>Network Name: </label>";
@@ -527,8 +471,7 @@ void handlePrivateWireless()
   page += "<button type='submit' name='savebutton' value='True'>Save</button>";
   page += "</form></div><br/>";
 
-  page += "<form method='post' action='/'>";
-  page += "<button type='submit'>Back</button></form>";
+  page += FPSTR(HTTP_HOMEB);
   page += FPSTR(HTTP_CLOSE);
 
   web_server.send ( 200, "text/html", page );
@@ -539,7 +482,7 @@ void handlePrivateWireless()
 void handlePublicWireless()
 {
 
-  Serial.println("Enter handlePublicWireless()");
+  debug_out(F("Enter handlePublicWireless()"));
   if(!isAuthenticated())
   {
     web_server.sendContent(FPSTR(HTTP_REDIRECT));
@@ -563,12 +506,8 @@ void handlePublicWireless()
     //  What is submitted ssid and password; do something only if it has changed
     //
 
-    Serial.print("I see the new ssid as");
-    Serial.println(web_server.arg("pubssid"));
-
     if(web_server.arg("pubpassone") == web_server.arg("pubpasstwo"))
     { 
-      Serial.println("The passwords do match");
       if(web_server.arg("pubssid").length() < 1 )
       {
         error_message += "Network Name cannot be blank.";
@@ -596,14 +535,12 @@ void handlePublicWireless()
           byte attempts = 0; 
           while (WiFi.status() != WL_CONNECTED && attempts < 24)
           {
-            Serial.print(".");
             delay(500);
             attempts++;
           }
+
 	  wifi_station_dhcpc_stop();
-         
 	  wifi_station_dhcpc_start();
-          
           delay(500);
 	  
           attempts = 0;
@@ -644,7 +581,6 @@ void handlePublicWireless()
           byte attempts = 0; 
           while (WiFi.status() != WL_CONNECTED && attempts < 24)
           {
-            Serial.print(".");
             delay(500);
             attempts++;
           }
@@ -760,8 +696,7 @@ void handlePublicWireless()
   page += "<button type='submit' name='savebutton' value='True'>Save</button>";
   page += "</form></div><br/>";
 
-  page += "<form method='post' action='/'>";
-  page += "<button type='submit'>Back</button></form></div>";
+  page += FPSTR(HTTP_HOMEB);
   page += FPSTR(HTTP_CLOSE);
 
   web_server.send ( 200, "text/html", page );
@@ -769,31 +704,88 @@ void handlePublicWireless()
 
 void handleOther()
 {
-
-
-  Serial.println("Enter handleOther()");
+  debug_out(F("Enter handleOther()"));
   if(!isAuthenticated())
   {
     web_server.sendContent(FPSTR(HTTP_REDIRECT));
     return;
   }
 
-  char temp[800];
-  int sec = millis() / 1000;
-  int min = sec / 60;
-  int hr = min / 60;
+  String error_message = "";
+
+  if(web_server.arg("savebutton") == "True")
+  {
+    if(web_server.arg("lpassone") != web_server.arg("lpasstwo"))
+    {
+      error_message += F("The password do not match");
+    }
+    else if(web_server.arg("lpassone").length() > 0) 
+    {
+      if(web_server.arg("lpassone").length() < 4)
+      {
+        error_message += F("Password must be 4+ characters");
+      }
+      else
+      {
+        web_interface_password = web_server.arg("lpassone");
+      }
+    }
+
+    if(web_server.arg("lname").length() < 4)
+    {
+      error_message += "Login must be 4+ characters";
+    }
+    else
+    {
+      web_interface_username = web_server.arg("lname");  
+    }
+
+    if(web_server.arg("muxon") == "yes")
+    {
+      nmea_mux_on = true;
+    }
+    else
+    {
+      nmea_mux_on = false;
+    }
+
+    nmea_mux_port = web_server.arg("muxport").toInt();
+    checkPort(nmea_mux_port);
+
+  }
+
 
   String page = FPSTR(HTTP_INITA);
   page += FPSTR(HTTP_TITLE);
   page += FPSTR(HTTP_STYLE);
   page += FPSTR(HTTP_DIV_A);
   page += FPSTR(HTTP_LOGOA);
-  page += "<h2>Account Settings</h2>";
+  page += FPSTR(HTTP_DIV_B);
+  page += "<h2>Other Settings</h2>";
+  page += "<h4>" + error_message + "</h4>";
 
-  page += "<p>I am a silly other form</p>";
+  page += "<form method='post' action='/other'>";
+  page += "<label for='muxon'>NMEA Output: </label>";
+  page += "<input type='checkbox' name='muxon' value='yes'";
+  if(nmea_mux_on)
+  {
+    page += " checked";
+  }
+  page += "><br/>";
+  page += "<label for='muxport'>NMEA Port: </label>";
+  page += "<input type='number' name='muxport' length='5' maxlength='5' value='" + String(nmea_mux_port) + "' ><br/>";
+  page += "<label for='lname'>Device Login: </label>";
+  page += "<input name='lname' value='" + web_interface_username + "'/><br/>";
+  page += "<label for='lpassone'>Device Password: </label>";
+  page += "<input name='lpassone' type='password' maxlength='32'/><br/>";
+  page += "<label for='lpasstwo'>Repeat: </label>";
+  page += "<input name='lpasstwo' type='password' maxlength='32'/><br/>";
+  page += "<button type='submit' name='savebutton' value='True'>Save</button>";
+  page += "</form></div><br/>";
 
-  page += "<form method='post' action='/'>";
-  page += "<button type='submit'>Home</button></form>";
+
+
+  page += FPSTR(HTTP_HOMEB);
   page += FPSTR(HTTP_CLOSE);
 
   web_server.send ( 200, "text/html", page );
@@ -808,7 +800,9 @@ void handleAdvanced()
   //
 
 
-  Serial.println("Enter handleAdvanced()");
+  debug_out(F("Enter handleAdvanced()"));
+
+
   if(!isAuthenticated())
   {
     String header = "HTTP/1.1 301 OK\r\nLocation: /login\r\nCache-Control: no-cache\r\n\r\n";
@@ -816,59 +810,221 @@ void handleAdvanced()
     return;
   }
 
-  char temp[800];
-  int sec = millis() / 1000;
-  int min = sec / 60;
-  int hr = min / 60;
+  String error_message = "";
+
+
+  if(web_server.arg("savebutton") == "True")
+  {
+    if(web_server.arg("phoneon") == "yes")
+    {
+      phone_home_on = true;
+    }
+    else
+    {
+      phone_home_on = false;
+    }
+    if(web_server.arg("fhserver").length() < 1)
+    {
+      error_message += "FloatHub Server cannot be blank";
+    }
+    else
+    {
+      float_hub_server = web_server.arg("fhserver");
+    }
+    float_hub_server_port = web_server.arg("fhport").toInt();
+    checkPort(float_hub_server_port);
+
+    if(web_server.arg("vserialon") == "yes")
+    {
+      virtual_serial_on = true;
+    }
+    else
+    {
+      virtual_serial_on = false; 
+    }  
+
+    virtual_serial_port = web_server.arg("vsport").toInt();
+    checkPort(virtual_serial_port);
+ 
+
+  }
+
 
   String page = FPSTR(HTTP_INITA);
   page += FPSTR(HTTP_TITLE);
   page += FPSTR(HTTP_STYLE);
   page += FPSTR(HTTP_DIV_A);
   page += FPSTR(HTTP_LOGOA);
+  page += FPSTR(HTTP_DIV_B);
+  page += "<h2>Advanced (Secret) Settings</h2>";
+  page += "<h4>" + error_message + "</h4>";
 
-  page += "<h2>Uber Secret Advanced Settings</h2>";
+  page += "<form method='post' action='/advanced'>";
+  page += "<label for='phoneon'>Upload Data: </label>";
+  page += "<input type='checkbox' name='phoneon' value='yes'";
+  if(phone_home_on)
+  {
+    page += " checked";
+  }
+  page += "><br/>";
+  page += "<label for='fhserver'>FloatHub Server: </label>";
+  page += "<input name='fhserver' value='" + float_hub_server + "'/><br/>";
+  page += "<label for='fhport'>Port: </label>";
+  page += "<input type='number' name='fhport' length='5' maxlength='5' value='" + String(float_hub_server_port) + "' ><br/>";
+  page += "<label for='vserialon'>Virtual Terminal: </label>";
+  page += "<input type='checkbox' name='vserialon' value='yes'";
+  if(virtual_serial_on)
+  {
+    page += " checked";
+  }
+  page += "><br/>";
+  page += "<label for='vsport'>Port: </label>";
+  page += "<input type='number' name='vsport' length='5' maxlength='5' value='" + String(virtual_serial_port) + "' ><br/>";
+  page += "<button type='submit' name='savebutton' value='True'>Save</button>";
+  page += "</form></div><br/>";
 
-  page += "<p>I am a silly advanced form</p>";
 
-  page += "<form method='post' action='/'>";
-  page += "<button type='submit'>Home</button></form>";
+
+  page += FPSTR(HTTP_HOMEB);
   page += FPSTR(HTTP_CLOSE);
 
   web_server.send ( 200, "text/html", page );
+
 }
 
 void handleAccount()
 {
 
 
-  Serial.println("Enter handleAccount()");
+  debug_out(F("Enter handleAccount()"));
   if(!isAuthenticated())
   {
     web_server.sendContent(FPSTR(HTTP_REDIRECT));
     return;
   }
 
-  char temp[800];
-  int sec = millis() / 1000;
-  int min = sec / 60;
-  int hr = min / 60;
+  //
+  // First see if we received any from submission
+  // 
+
+  String error_message = "";
+
+
+  if(web_server.hasArg("deviceid") && web_server.arg("savebutton") == "True")
+  {
+
+    if(web_server.arg("deviceid").length() != 8)
+    {
+      error_message += "Device ID must be exactly 8 characters";
+    }
+    else
+    {
+      bool chars_ok = true;
+      for(int i = 0; i < 8; i++)
+      {
+        byte tester = web_server.arg("deviceid").charAt(i);
+        if(tester < 48 || (tester > 57 && tester < 65) || (tester > 90 && tester < 97 ) || tester > 122)
+	{
+	  chars_ok = false;
+	}
+      }
+      if(!chars_ok)
+      {
+        error_message += "Invalid characters in Device ID";
+      }
+      else
+      {
+        if(web_server.arg("aeskey").length() != 32)
+        {
+          error_message += "Security Key must be exactly 32 characters";
+        }
+        else
+        {
+          chars_ok = true;
+          for(int i = 0; i < 8; i++)
+          {
+            byte tester = web_server.arg("aeskey").charAt(i);
+            if(tester < 48 || (tester > 57 && tester < 65) || (tester > 70 && tester < 97 ) || tester > 102)
+	    {
+	      chars_ok = false;
+	    }
+          }
+          if(!chars_ok)
+          {
+            error_message += "Invalid characters in Security Key";
+          }
+          else
+          {
+            // Wow, we survived everything
+            float_hub_id = web_server.arg("deviceid");
+            
+	    String temp_string = web_server.arg("aeskey");
+	    temp_string.toLowerCase();
+
+            for(int i = 0; i < 16; i++)
+            {
+              int new_value = 0;
+              char left_byte = temp_string.charAt(i * 2);
+              if(left_byte <= '9')
+              {
+                new_value = (left_byte - '0' ) * 16;
+              }
+              else
+              {   
+                new_value = (left_byte - 'a' + 10) * 16;
+              }
+              char right_byte = temp_string.charAt((i * 2) + 1);
+    
+              if (right_byte <='9')
+              {
+                new_value += right_byte - '0';
+              } 
+              else
+              {   
+                new_value += right_byte - 'a' + 10;
+              }
+
+              float_hub_aes_key[i] = new_value;
+            }
+          }
+        }
+      }
+    } 
+  }
 
   String page = FPSTR(HTTP_INITA);
   page += FPSTR(HTTP_TITLE);
   page += FPSTR(HTTP_STYLE);
   page += FPSTR(HTTP_DIV_A);
   page += FPSTR(HTTP_LOGOA);
-
+  page += FPSTR(HTTP_DIV_B);
   page += "<h2>Account Settings</h2>";
+  page += "<h4>" + error_message + "</h4>";
 
-  page += "<p>I am a hedgehog form</p>";
+  page += "<form method='post' action='/account'>";
+  page += "<label for='deviceid'>Device ID: </label>";
+  page += "<input name='deviceid' value='" + float_hub_id + "' style='width: 250px; font-size: 9pt;'/><br/>";
+  page += "<label for='aeskey'>Security Key: </label>";
+  page += "<input name='aeskey' value='";
 
-  page += "<form method='post' action='/'>";
-  page += "<button type='submit'>Home</button></form>";
+  for(int i = 0; i < 16; i++)
+  {
+    if(float_hub_aes_key[i] < 16)
+    {
+      page += "0";
+    }
+    page += String(float_hub_aes_key[i], HEX);
+  }
+
+  page += "' style='width: 250px; font-size: 9pt;'/><br/>";
+  page += "<button type='submit' name='savebutton' value='True'>Save</button>";
+  page += "</form></div><br/>";
+
+  page += FPSTR(HTTP_HOMEB);
   page += FPSTR(HTTP_CLOSE);
 
   web_server.send ( 200, "text/html", page );
+
 }
 
 void handleLogo()
@@ -886,8 +1042,6 @@ void handleFavicon()
 void setup(void)
 {
   Serial.begin ( 115200 );
-  //delay(500);
-  Serial.println("Hello there");
 
 
   //
@@ -910,6 +1064,11 @@ void setup(void)
   //public_wifi_ssid = "FunkyChicken";
   //public_wifi_password = "tits";
 
+  float_hub_id = "outofbox";
+  for(int i = 0; i < 16; i++)
+  {
+    float_hub_aes_key[i] = i;
+  }
 
   public_ip_is_static = false;
   public_static_ip   = IPAddress(192,168,1,42);
@@ -917,6 +1076,17 @@ void setup(void)
   public_static_mask = IPAddress(255,255,255,0);
   public_static_dns  = IPAddress(192,168,1,1);
 
+  web_interface_username = "floathub";
+  web_interface_password = "floathub";
+ 
+  nmea_mux_on = true;
+  nmea_mux_port = 2319;
+
+  phone_home_on = true;
+  float_hub_server = "fdr.floathub.net";
+  float_hub_server_port = 50003;
+  virtual_serial_on = false;
+  virtual_serial_port = 1923;
 
 
   
@@ -924,6 +1094,7 @@ void setup(void)
   byte mac_array[6];
   WiFi.softAPmacAddress(mac_array);
 
+/*
   Serial.print("MAC: ");
   Serial.print(mac_array[5],HEX);
   Serial.print(":");
@@ -936,6 +1107,7 @@ void setup(void)
   Serial.print(mac_array[1],HEX);
   Serial.print(":");
   Serial.println(mac_array[0],HEX);
+*/
 
   private_wifi_password = "FloatHub"; // min 8
 
@@ -944,21 +1116,11 @@ void setup(void)
   private_wifi_ssid += String(mac_array[4], HEX);
   private_wifi_ssid += String(mac_array[5], HEX);
 
-/*
-  char mac_char[18];
-  for (int i = 3; i < sizeof(mac_array); ++i)
-  {
-    Serial.print("mac_char is now 
-    sprintf(mac_char,"%s%02x",mac_char,mac_array[i]);
-  }
-
-  private_wifi_ssid += String(mac_char);
-*/
 
 //  debug_out(String("Creating AP with SSID of ") + private_wifi_ssid);
 	
-  Serial.print("I think I want to create a WiFi network called: ");
-  Serial.println(private_wifi_ssid);
+//  Serial.print("I think I want to create a WiFi network called: ");
+//  Serial.println(private_wifi_ssid);
 
 
   WiFi.mode(WIFI_AP_STA);
@@ -1003,30 +1165,21 @@ void setup(void)
   dns_server.setErrorReplyCode(DNSReplyCode::NoError);
   dns_server.start(53, "*", WiFi.softAPIP());
 
-  printCookies();
-
 }
 
 
 void houseKeeping()
 {
 
-  Serial.print("WiFi.status()=");
-  Serial.print(WiFi.status());
-  Serial.print( ", IP address: " );
-  Serial.println( WiFi.localIP() );
-
-
+  debug_out(String(F("WiFi.status()=")) + WiFi.status() + String(F(", IP address: ")) + WiFi.localIP()); 
 
   long now = millis();
   for(int i; i < MAX_COOKIES; i++)
   {
     if(now - cookies[i].time > 60 * 1000 * 8 && cookies[i].valid == true)	// 8 minute cookie timeout
     {
-       printCookies();
        Serial.println("Nuked a cookie");
        nukeCookie(i);
-       printCookies();
     }
   }
 }
@@ -1052,122 +1205,3 @@ void loop(void)
 }
 
 
-
-
-
-/*
-
-
-const char *ssid = "SuperMOO";
-const char *password = "VeryS1lly";
-
-ESP8266WebServer server ( 80 );
-
-const int led = 13;
-
-void handleRoot() {
-	digitalWrite ( led, 1 );
-	char temp[400];
-	int sec = millis() / 1000;
-	int min = sec / 60;
-	int hr = min / 60;
-
-	snprintf ( temp, 400,
-
-"<html>\
-  <head>\
-    <meta http-equiv='refresh' content='5'/>\
-    <title>ESP8266 Demo</title>\
-    <style>\
-      body { background-color: #cccccc; font-family: Arial, Helvetica, Sans-Serif; Color: #000088; }\
-    </style>\
-  </head>\
-  <body>\
-    <h1>Hello from ESP8266!</h1>\
-    <p>Uptime: %02d:%02d:%02d</p>\
-    <img src=\"/test.svg\" />\
-  </body>\
-</html>",
-
-		hr, min % 60, sec % 60
-	);
-	server.send ( 200, "text/html", temp );
-	digitalWrite ( led, 0 );
-}
-
-void handleNotFound() {
-	digitalWrite ( led, 1 );
-	String message = "File Not Found Fucking Pumper Lumper Lumpy nutjob\n\n";
-	message += "URI: ";
-	message += server.uri();
-	message += "\nMethod: ";
-	message += ( server.method() == HTTP_GET ) ? "GET" : "POST";
-	message += "\nArguments: ";
-	message += server.args();
-	message += "\n";
-
-	for ( uint8_t i = 0; i < server.args(); i++ ) {
-		message += " " + server.argName ( i ) + ": " + server.arg ( i ) + "\n";
-	}
-
-	server.send ( 404, "text/plain", message );
-	digitalWrite ( led, 0 );
-}
-
-
-void drawGraph() {
-  String out = "";
-  char temp[100];
-  out += "<svg xmlns=\"http://www.w3.org/2000/svg\" version=\"1.1\" width=\"400\" height=\"150\">\n";
-  out += "<rect width=\"400\" height=\"150\" fill=\"rgb(250, 230, 210)\" stroke-width=\"1\" stroke=\"rgb(0, 0, 0)\" />\n";
-  out += "<g stroke=\"black\">\n";
-  int y = rand() % 130;
-  for (int x = 10; x < 390; x+= 10) {
-    int y2 = rand() % 130;
-    sprintf(temp, "<line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\" stroke-width=\"1\" />\n", x, 140 - y, x + 10, 140 - y2);
-    out += temp;
-    y = y2;
-  }
-  out += "</g>\n</svg>\n";
-
-  server.send ( 200, "image/svg+xml", out);
-}
-
-void setup ( void ) {
-	pinMode ( led, OUTPUT );
-	digitalWrite ( led, 0 );
-	Serial.begin ( 115200 );
-	WiFi.begin ( ssid, password );
-	Serial.println ( "" );
-
-	// Wait for connection
-	while ( WiFi.status() != WL_CONNECTED ) {
-		delay ( 500 );
-		Serial.print ( "." );
-	}
-
-	Serial.println ( "" );
-	Serial.print ( "Connected to " );
-	Serial.println ( ssid );
-	Serial.print ( "IP address: " );
-	Serial.println ( WiFi.localIP() );
-
-	if ( MDNS.begin ( "floathub" ) ) {
-		Serial.println ( "MDNS responder started" );
-	}
-
-	server.on ( "/", handleRoot );
-	server.on ( "/test.svg", drawGraph );
-	server.on ( "/inline", []() {
-		server.send ( 200, "text/plain", "this works as well" );
-	} );
-	server.onNotFound ( handleNotFound );
-	server.begin();
-	Serial.println ( "HTTP server started" );
-}
-
-void loop ( void ) {
-	server.handleClient();
-}
-
-*/
