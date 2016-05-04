@@ -27,6 +27,7 @@
 #include <ESP8266WebServer.h>
 #include <ESP8266mDNS.h>
 #include <DNSServer.h>
+#include <EEPROM.h>
 #include "static.h"
 
 
@@ -97,6 +98,8 @@ unsigned int  float_hub_server_port;		// default: 50003
 bool	      virtual_serial_on;		// default: no
 unsigned int  virtual_serial_port;		// default: 1923
 
+unsigned long boot_counter;			
+
 
 //
 //	Struct to hold out authentication cookies
@@ -150,6 +153,444 @@ void nukeCookie(int which_one)
   cookies[which_one].valid = false;
 }
 
+
+
+//
+//	EEPROM routines to factory init, read, and write so we have settings
+// persistence between reboots, power cycles.
+//
+
+void writeStringToEEPROM(int location, String the_string, unsigned int max_length_not_including_terminating_zero = 32)
+{
+  int i;
+  for(i = 0; i < std::min(the_string.length(), max_length_not_including_terminating_zero); i++)
+  {
+    EEPROM.write(location + i, the_string.charAt(i));
+  }
+  EEPROM.write(location + i, '\0');
+}
+
+void readStringFromEEPROM(int location, String &the_string, unsigned int max_length_not_including_terminating_zero = 32)
+{
+  char next_char;
+  the_string = "";
+  for(int i = 0; i < max_length_not_including_terminating_zero; i++)
+  {
+    next_char = EEPROM.read(location + i);
+    if(next_char == '\0')
+    {
+      break;
+    }
+    the_string += next_char;
+  }
+}
+
+
+
+
+void init_eeprom_memory()
+{
+
+  int i;
+
+  //
+  //  This function is called only during factory reset or intial startup
+  //
+    
+  for(i = 6; i < 10; i++)
+  {
+    EEPROM.write(i,0);
+  }
+  
+  //
+  //  Set default id
+  //
+  
+  EEPROM.write(10, 'o');
+  EEPROM.write(11, 'u');
+  EEPROM.write(12, 't');
+  EEPROM.write(13, 'o');
+  EEPROM.write(14, 'f');
+  EEPROM.write(15, 'b');
+  EEPROM.write(16, 'o');
+  EEPROM.write(17, 'x');
+  
+  //
+  //  Set default server
+  //
+
+
+  writeStringToEEPROM(18, F("fdr.floathub.net"));
+  EEPROM.write(50, '\0');
+  
+  //
+  //  Set default port of 50003
+  //
+  
+  EEPROM.write(51, 195);
+  EEPROM.write(52, 83);
+
+  //
+  //  Default public WiFi SSID & Password
+  //
+
+  writeStringToEEPROM(53, F("floathub"));
+  EEPROM.write(85, '\0');
+  
+  writeStringToEEPROM(86, F("floathub"));
+  EEPROM.write(118, '\0');
+  
+  
+  //
+  //  Default private WiFi SSID & Password
+  //
+
+
+  byte mac_array[6];
+  WiFi.softAPmacAddress(mac_array);
+
+  private_wifi_ssid = "FloatHub_";
+  if(mac_array[3] < 16)
+  {
+    private_wifi_ssid += 0;
+  }
+  private_wifi_ssid += String(mac_array[3], HEX);
+  if(mac_array[4] < 16)
+  {
+    private_wifi_ssid += 0;
+  }
+  private_wifi_ssid += String(mac_array[4], HEX);
+  if(mac_array[5] < 16)
+  {
+    private_wifi_ssid += 0;
+  }
+  private_wifi_ssid += String(mac_array[5], HEX);
+
+
+  writeStringToEEPROM(119, private_wifi_ssid);
+  EEPROM.write(151, '\0');
+  
+  writeStringToEEPROM(152, F("floathub"));
+  EEPROM.write(184, '\0');
+  
+  //
+  //  MDNS .local name 
+  //
+
+  writeStringToEEPROM(185, F("floathub"));
+  EEPROM.write(217, '\0');
+  
+  //
+  // Is public IP address static (no)
+  //
+
+  EEPROM.write(218, 0);
+
+  //
+  // Static IP, gateway, mask, dns 
+  //
+
+  EEPROM.write(219, 1); EEPROM.write(220, 2); EEPROM.write(221, 3); EEPROM.write(222, 4); 
+  EEPROM.write(223, 5); EEPROM.write(224, 6); EEPROM.write(225, 7); EEPROM.write(226, 8); 
+  EEPROM.write(227, 255); EEPROM.write(228, 255); EEPROM.write(229, 255); EEPROM.write(230, 0); 
+  EEPROM.write(231, 8); EEPROM.write(232, 8); EEPROM.write(233, 8); EEPROM.write(234, 8); 
+
+  //
+  //  Set to some kind of default AES key
+  //
+  
+  EEPROM.write(235, 0x00);
+  EEPROM.write(236, 0x01);
+  EEPROM.write(237, 0x02);
+  EEPROM.write(238, 0x03);
+  EEPROM.write(239, 0x04);
+  EEPROM.write(240, 0x05);
+  EEPROM.write(241, 0x06);
+  EEPROM.write(242, 0x07);
+  EEPROM.write(243, 0x08);
+  EEPROM.write(244, 0x09);
+  EEPROM.write(245, 0x0A);
+  EEPROM.write(246, 0x0B);
+  EEPROM.write(247, 0x0C);
+  EEPROM.write(248, 0x0D);
+  EEPROM.write(249, 0x0E);
+  EEPROM.write(250, 0x0F);
+
+
+  //
+  // NMEA muxer flag and port of 2319
+  //
+
+  EEPROM.write(251, 0);
+  EEPROM.write(252, 9);
+  EEPROM.write(253, 15);
+ 
+  //
+  // Web interface username and password
+  //
+
+  writeStringToEEPROM(254, F("floathub"));
+  EEPROM.write(286, '\0');
+  
+  writeStringToEEPROM(287, F("floathub"));
+  EEPROM.write(319, '\0');
+
+  //
+  //  Phone home flag (yes)
+  //
+
+  EEPROM.write(320, 1);
+
+  //
+  //  Virtual serial flag and port of 1923
+  //
+
+  EEPROM.write(321, 0);
+  EEPROM.write(322, 7);
+  EEPROM.write(323, 131);
+
+  //
+  //  Do this last to show EEPROM set
+  //
+
+  for(i = 0; i < 6; i++)
+  {
+    EEPROM.write(i, 42);
+  }
+  
+  //
+  //  For ESP8266, this does not "take" unless you commit
+  //
+
+  EEPROM.commit();
+}
+
+
+void write_eeprom_memory()
+{
+  int i; 
+  //
+  //  This just pushes current variables (e.g. float hub id) to EEPROM 
+  //
+    
+  //
+  //  Store id
+  //
+  
+  for(i = 0; i < 8; i++)
+  {
+    EEPROM.write(10 + i, float_hub_id[i]);
+  }
+  
+  //
+  //  Store server
+  //
+  
+  writeStringToEEPROM(18, float_hub_server);
+  
+  //
+  //  Store port
+  //
+  
+  EEPROM.write(51, highByte(float_hub_server_port));
+  EEPROM.write(52, lowByte(float_hub_server_port));
+  
+  //
+  //  Public/Private WiFi SSID & Password
+  //
+
+  writeStringToEEPROM( 53, public_wifi_ssid);
+  writeStringToEEPROM( 86, public_wifi_password);
+  writeStringToEEPROM(119, private_wifi_ssid);
+  writeStringToEEPROM(152, private_wifi_password);
+
+  //
+  // MDNS .local name
+  //
+
+  writeStringToEEPROM(185, mdns_name);
+
+
+  //
+  // public ip static flag
+  //
+
+  EEPROM.write(218, public_ip_is_static);
+
+  //
+  // Static IP values
+  //
+
+  EEPROM.write(219, public_static_ip[0]);   EEPROM.write(220, public_static_ip[1]);     EEPROM.write(221, public_static_ip[2]);     EEPROM.write(222, public_static_ip[3]); 
+  EEPROM.write(223, public_static_gate[0]); EEPROM.write(224, public_static_gate[1]);   EEPROM.write(225, public_static_gate[2]);   EEPROM.write(226, public_static_gate[3]); 
+  EEPROM.write(227, public_static_mask[0]); EEPROM.write(228, public_static_mask[1]);   EEPROM.write(229, public_static_mask[2]);   EEPROM.write(230, public_static_mask[3]); 
+  EEPROM.write(231, public_static_dns[0]);  EEPROM.write(232, public_static_dns[1]);    EEPROM.write(233, public_static_dns[2]);    EEPROM.write(234, public_static_dns[3]); 
+
+  //
+  //  Store AES key
+  //
+  
+  for(i = 0; i < 16; i++)
+  {
+    EEPROM.write(235 + i, float_hub_aes_key[i]);
+  }
+
+  //
+  // NMEA muxer flag and port
+  //
+
+  EEPROM.write(251, nmea_mux_on);
+  EEPROM.write(252, highByte(nmea_mux_port));
+  EEPROM.write(253, lowByte(nmea_mux_port));
+ 
+  //
+  // Web interface username and password
+  //
+
+  writeStringToEEPROM(254, web_interface_username);
+  writeStringToEEPROM(287, web_interface_password);
+
+  //
+  //  Phone home flag
+  //
+
+  EEPROM.write(320, phone_home_on);
+
+  //
+  //  Virtual serial flag and port of 1923
+  //
+
+  EEPROM.write(321, virtual_serial_on);
+  EEPROM.write(322, highByte(virtual_serial_port));
+  EEPROM.write(323, lowByte(virtual_serial_port));
+
+  
+  //
+  //  For ESP8266, this does not "take" unless you commit
+  //
+
+  EEPROM.commit();
+
+  
+}
+
+
+
+void read_eeprom_memory()
+{
+  int i;
+  char next_char;
+  byte byte_zero, byte_one, byte_two, byte_three;
+
+  //
+  //  As part of startup, set variables from non-volatile EEPROM
+  //
+
+
+
+  //
+  //  Read, augment, the write back boot counter
+  //
+
+  boot_counter  = (unsigned int) EEPROM.read(9);
+  boot_counter += (unsigned int) EEPROM.read(8) * 256;
+  boot_counter += (unsigned int) EEPROM.read(7) * 65536;
+  boot_counter += (unsigned int) EEPROM.read(6) * 16777216;
+
+  boot_counter += 1;
+  
+  byte_zero   = byte(boot_counter);
+  byte_one    = byte(boot_counter >> 8);
+  byte_two    = byte(boot_counter >> 16);
+  byte_three  = byte(boot_counter >> 24);
+  
+  EEPROM.write(9, byte_zero);
+  EEPROM.write(8, byte_one);
+  EEPROM.write(7, byte_two);
+  EEPROM.write(6, byte_three);
+  EEPROM.commit();
+  
+  //
+  //  Read floathub id
+  //
+  
+  float_hub_id = "";
+  for(i = 0; i < 8; i++)
+  {
+    next_char = EEPROM.read(10 + i);
+    float_hub_id += next_char;
+  }
+  
+  //
+  //  Server port
+  //
+
+  float_hub_server_port  = EEPROM.read(52);
+  float_hub_server_port += EEPROM.read(51) * 256;
+  
+
+  //
+  //  Read Some Strings
+  //
+
+  readStringFromEEPROM( 18, float_hub_server);
+  readStringFromEEPROM( 53, public_wifi_ssid);
+  readStringFromEEPROM( 86, public_wifi_password);
+  readStringFromEEPROM(119, private_wifi_ssid);
+  readStringFromEEPROM(152, private_wifi_password);
+  readStringFromEEPROM(185, mdns_name);
+  readStringFromEEPROM(254, web_interface_username);
+  readStringFromEEPROM(287, web_interface_password);
+  
+  //
+  // Static IP stuff
+  //
+
+  public_ip_is_static = EEPROM.read(218);
+
+  public_static_ip   = IPAddress(EEPROM.read(219), EEPROM.read(220), EEPROM.read(221), EEPROM.read(222));
+  public_static_gate = IPAddress(EEPROM.read(223), EEPROM.read(224), EEPROM.read(225), EEPROM.read(226)); 
+  public_static_mask = IPAddress(EEPROM.read(227), EEPROM.read(228), EEPROM.read(229), EEPROM.read(230)); 
+  public_static_dns  = IPAddress(EEPROM.read(231), EEPROM.read(232), EEPROM.read(233), EEPROM.read(234)); 
+
+  //
+  //  Read AES key
+  //
+  
+  for(i = 0; i < 16; i++)
+  {
+    float_hub_aes_key[i] = EEPROM.read(235 + i);
+  }    
+
+  //
+  //  NMEA Muxer stuff
+  //
+
+  nmea_mux_on = EEPROM.read(251);
+  nmea_mux_port  = EEPROM.read(253);
+  nmea_mux_port += EEPROM.read(252) * 256;
+  
+  //
+  //  Phone home?
+  // 
+  
+  phone_home_on = EEPROM.read(320);
+
+  //
+  //  Virtual Serial
+  // 
+
+  virtual_serial_on = EEPROM.read(321);
+  virtual_serial_port  = EEPROM.read(323);
+  virtual_serial_port += EEPROM.read(322) * 256;
+  
+}  
+
+
+
+
+
+
 bool isAuthenticated()
 {
   if (web_server.hasHeader("Cookie"))
@@ -177,7 +618,7 @@ bool isAuthenticated()
            //
           
            cookies[i].time = millis();
-           debug_out(F("Yay, cookie hit"));
+           debug_out(F("Yay, cookie hitttttt"));
            return true;
          }
       }
@@ -248,14 +689,6 @@ void handleLogin()
 
   debug_out(F("Enter handleLogin()"));
 
-/*
-  if (web_server.hasHeader("Cookie"))
-  {   
-    Serial.print("Found cookie: ");
-    String cookie = web_server.header("Cookie");
-    Serial.println(cookie);
-  }
-*/
   if (web_server.hasArg("DISCONNECT"))
   {
     debug_out(F("Disconnection"));
@@ -368,11 +801,11 @@ void handleRoot()
 
   if(isOnPrivateNetwork())
   {
-    page += "<h5>" + public_address + " | floathub.local | <a href='http://" + private_address + "'>" + private_address + "</a></h5>";
+    page += "<h5>" + public_address + " | " + mdns_name + ".local | <a href='http://" + private_address + "'>" + private_address + "</a></h5>";
   }
   else
   {
-    page += "<h5><a href='http://" + public_address + "'>" + public_address + "</a> | <a href='http://floathub.local'>floathub.local</a> | " + private_address + "</h5>";
+    page += "<h5><a href='http://" + public_address + "'>" + public_address + "</a> | <a href='http://" + mdns_name + ".local'>" + mdns_name + ".local</a> | " + private_address + "</h5>";
   }
   page += FPSTR(HTTP_DIV_B);
   page += "<h2>Device Settings</h2>";
@@ -420,10 +853,6 @@ void handlePrivateWireless()
   {
 
     //
-    //  We are autenticated and a form was submitted, better process and act on it
-    //
-
-    //
     //  What is submitted ssid and password; do something only if it has changed
     //
 
@@ -443,6 +872,7 @@ void handlePrivateWireless()
         private_wifi_ssid = web_server.arg("privssid");
         private_wifi_password = web_server.arg("privpassone");
         WiFi.softAP(private_wifi_ssid.c_str(), private_wifi_password.c_str());
+        write_eeprom_memory();
       }
     }
     else
@@ -478,6 +908,20 @@ void handlePrivateWireless()
 }
 
 
+void kickMDNS()
+{
+  int attempts = 0;
+  while((!MDNS.begin (mdns_name.c_str(), WiFi.localIP())) && attempts < 12)
+  {
+    debug_out("MDNS died off ... will retry");
+    delay(500);
+    attempts++;
+    if(attempts >= 12)
+    {
+      debug_out("Can't get MDNS up at all");
+    }
+  }
+}
 
 void handlePublicWireless()
 {
@@ -524,6 +968,7 @@ void handlePublicWireless()
               public_wifi_password = web_server.arg("pubpassone");
           }
           
+          write_eeprom_memory();
           sendPleaseWait("/public");
 
           WiFi.disconnect();
@@ -543,27 +988,15 @@ void handlePublicWireless()
 	  wifi_station_dhcpc_start();
           delay(500);
 	  
-          attempts = 0;
-          while((!MDNS.begin (mdns_name.c_str(), WiFi.localIP())) && attempts < 12)
-          {
-            debug_out("MDNS died off ... will retry");
-            delay(500);
-            attempts++;
-            if(attempts >= 12)
-            {
-              debug_out("Can't get MDNS up at all");
-            }
-           }
+          kickMDNS();
           return;
         }
         else
         {
-          sendPleaseWait("http://" + web_server.arg("local1") + "." + web_server.arg("local2") + "." +  web_server.arg("local3") + "." + web_server.arg("local4") + "/public");
-          public_ip_is_static = true;
-
           // Set Public Wireless for Static 
-          public_wifi_ssid = web_server.arg("pubssid");
 
+          public_ip_is_static = true;
+          public_wifi_ssid = web_server.arg("pubssid");
           //
           //  If no password, we're ok. If something set, change to that
           //
@@ -572,6 +1005,18 @@ void handlePublicWireless()
           {
               public_wifi_password = web_server.arg("pubpassone");
           }
+
+          public_static_ip   = IPAddress(web_server.arg("local1").toInt(), web_server.arg("local2").toInt(), web_server.arg("local3").toInt(), web_server.arg("local4").toInt());
+          public_static_gate = IPAddress(web_server.arg("gate1").toInt(), web_server.arg("gate2").toInt(), web_server.arg("gate3").toInt(), web_server.arg("gate4").toInt());
+          public_static_mask = IPAddress(web_server.arg("mask1").toInt(), web_server.arg("mask2").toInt(), web_server.arg("mask3").toInt(), web_server.arg("mask4").toInt());
+          public_static_dns  = IPAddress(web_server.arg("dns1").toInt(), web_server.arg("dns2").toInt(), web_server.arg("dns3").toInt(), web_server.arg("dns4").toInt());
+
+
+          write_eeprom_memory();
+
+          sendPleaseWait("http://" + web_server.arg("local1") + "." + web_server.arg("local2") + "." +  web_server.arg("local3") + "." + web_server.arg("local4") + "/public");
+
+
           
 
           WiFi.disconnect();
@@ -584,12 +1029,7 @@ void handlePublicWireless()
             delay(500);
             attempts++;
           }
-          WiFi.config(
-            IPAddress(web_server.arg("local1").toInt(), web_server.arg("local2").toInt(), web_server.arg("local3").toInt(), web_server.arg("local4").toInt()),
-            IPAddress(web_server.arg("gate1").toInt(), web_server.arg("gate2").toInt(), web_server.arg("gate3").toInt(), web_server.arg("gate4").toInt()),
-            IPAddress(web_server.arg("mask1").toInt(), web_server.arg("mask2").toInt(), web_server.arg("mask3").toInt(), web_server.arg("mask4").toInt()),
-            IPAddress(web_server.arg("dns1").toInt(), web_server.arg("dns2").toInt(), web_server.arg("dns3").toInt(), web_server.arg("dns4").toInt())
-                     );
+          WiFi.config(public_static_ip, public_static_gate, public_static_mask, public_static_dns);
           return;
         }
       }
@@ -685,10 +1125,10 @@ void handlePublicWireless()
   page += "<div>";
 
 
-  spitOutIPInput(page, "local", "Local IP Address: ", WiFi.localIP());
-  spitOutIPInput(page, "gate", "Gateway: ", WiFi.gatewayIP());
-  spitOutIPInput(page, "mask", "Mask: ", WiFi.subnetMask());
-  spitOutIPInput(page, "dns", "DNS: ", WiFi.dnsIP());
+  spitOutIPInput(page, "local", "Local IP Address: ", public_static_ip);
+  spitOutIPInput(page, "gate", "Gateway: ", public_static_gate);
+  spitOutIPInput(page, "mask", "Mask: ", public_static_mask);
+  spitOutIPInput(page, "dns", "DNS: ", public_static_dns);
 
 
   page += "</div>";
@@ -715,6 +1155,7 @@ void handleOther()
 
   if(web_server.arg("savebutton") == "True")
   {
+    bool something_changed = false;
     if(web_server.arg("lpassone") != web_server.arg("lpasstwo"))
     {
       error_message += F("The password do not match");
@@ -727,6 +1168,7 @@ void handleOther()
       }
       else
       {
+        something_changed = true;
         web_interface_password = web_server.arg("lpassone");
       }
     }
@@ -737,21 +1179,42 @@ void handleOther()
     }
     else
     {
+      something_changed = true;
       web_interface_username = web_server.arg("lname");  
     }
 
-    if(web_server.arg("muxon") == "yes")
+    if(web_server.arg("muxon") == "yes" && !nmea_mux_on)
     {
       nmea_mux_on = true;
+      something_changed = true;
     }
-    else
+    else if(nmea_mux_on)
     {
       nmea_mux_on = false;
+      something_changed = true;
     }
 
-    nmea_mux_port = web_server.arg("muxport").toInt();
-    checkPort(nmea_mux_port);
+    if(nmea_mux_port != web_server.arg("muxport").toInt())
+    {
+      nmea_mux_port = web_server.arg("muxport").toInt();
+      checkPort(nmea_mux_port);
+      something_changed = true;
+    }
+    if(web_server.arg("localname").length() < 1)
+    {
+      error_message += ".local name cannot be blank";
+    }
+    else if(web_server.arg("localname") != mdns_name)
+    {
+       mdns_name = web_server.arg("localname");
+       kickMDNS();
+       something_changed = true;
+    }
 
+    if(something_changed)
+    {
+      write_eeprom_memory();
+    }
   }
 
 
@@ -771,7 +1234,7 @@ void handleOther()
   {
     page += " checked";
   }
-  page += "><br/>";
+  page += "/><br/>";
   page += "<label for='muxport'>NMEA Port: </label>";
   page += "<input type='number' name='muxport' length='5' maxlength='5' value='" + String(nmea_mux_port) + "' ><br/>";
   page += "<label for='lname'>Device Login: </label>";
@@ -780,6 +1243,8 @@ void handleOther()
   page += "<input name='lpassone' type='password' maxlength='32'/><br/>";
   page += "<label for='lpasstwo'>Repeat: </label>";
   page += "<input name='lpasstwo' type='password' maxlength='32'/><br/>";
+  page += "<label for='localname'>.local Name: </label>";
+  page += "<input name='localname' value='" + mdns_name + "'/><br/>";
   page += "<button type='submit' name='savebutton' value='True'>Save</button>";
   page += "</form></div><br/>";
 
@@ -845,7 +1310,7 @@ void handleAdvanced()
 
     virtual_serial_port = web_server.arg("vsport").toInt();
     checkPort(virtual_serial_port);
- 
+    write_eeprom_memory(); 
 
   }
 
@@ -986,6 +1451,7 @@ void handleAccount()
 
               float_hub_aes_key[i] = new_value;
             }
+	    write_eeprom_memory();
           }
         }
       }
@@ -1039,10 +1505,10 @@ void handleFavicon()
 
 
 
+
 void setup(void)
 {
   Serial.begin ( 115200 );
-
 
   //
   // Seed the random number generator so our cookie values are reasonably (pseudo-)random
@@ -1055,8 +1521,28 @@ void setup(void)
     nukeCookie(i);
   }
 
+  //
+  //  Handle EEPROM logic for persistant settings (if the first 5 bytes of
+  //  EEPROM memory are not all set to 42, then this is a completely
+  //  unitialized device)
+  //
+  
+  EEPROM.begin(400);
+  int a = 0;
+  for(int i = 0; i < 6; i++)
+  {
+    a = EEPROM.read(i);
+    if(a != 42)
+    {
+      debug_out("Virgin Module");
+      init_eeprom_memory();
+      break;
+    }
+  }
 
+  read_eeprom_memory();
 
+/*
   //public_wifi_ssid = "SuperMOO";
   public_wifi_ssid = "NoWorky";
   public_wifi_password = "VeryS1lly";
@@ -1087,12 +1573,12 @@ void setup(void)
   float_hub_server_port = 50003;
   virtual_serial_on = false;
   virtual_serial_port = 1923;
-
+*/
 
   
   //ESP.eraseConfig();
-  byte mac_array[6];
-  WiFi.softAPmacAddress(mac_array);
+//  byte mac_array[6];
+//  WiFi.softAPmacAddress(mac_array);
 
 /*
   Serial.print("MAC: ");
@@ -1109,12 +1595,12 @@ void setup(void)
   Serial.println(mac_array[0],HEX);
 */
 
-  private_wifi_password = "FloatHub"; // min 8
+//  private_wifi_password = "FloatHub"; // min 8
 
-  private_wifi_ssid = "FloatHub_";
-  private_wifi_ssid += String(mac_array[3], HEX);
-  private_wifi_ssid += String(mac_array[4], HEX);
-  private_wifi_ssid += String(mac_array[5], HEX);
+//  private_wifi_ssid = "FloatHub_";
+//  private_wifi_ssid += String(mac_array[3], HEX);
+//  private_wifi_ssid += String(mac_array[4], HEX);
+//  private_wifi_ssid += String(mac_array[5], HEX);
 
 
 //  debug_out(String("Creating AP with SSID of ") + private_wifi_ssid);
@@ -1122,10 +1608,25 @@ void setup(void)
 //  Serial.print("I think I want to create a WiFi network called: ");
 //  Serial.println(private_wifi_ssid);
 
+  debug_out("");
+  debug_out(String("Boot: ") + String(boot_counter) + String(", public_wifi_ssid = ") + public_wifi_ssid);
+
+
+  //
+  // Fire up the WiFi
+  //
 
   WiFi.mode(WIFI_AP_STA);
   WiFi.begin(public_wifi_ssid.c_str(), public_wifi_password.c_str());
   WiFi.softAP(private_wifi_ssid.c_str(), private_wifi_password.c_str());
+  if(public_ip_is_static)
+  {
+    WiFi.config(public_static_ip, public_static_gate, public_static_mask, public_static_dns);
+  }
+
+  //
+  // Bring up the web server
+  //
 
   web_server.on ( "/", handleRoot );
   web_server.on ( "/logo.png", handleLogo );
@@ -1136,6 +1637,7 @@ void setup(void)
   web_server.on ( "/other", handleOther );
   web_server.on ( "/advanced", handleAdvanced );
   web_server.on ( "/account", handleAccount );
+  web_server.onNotFound(handleLogin);
 
   //
   //  Set which headers to keep track of
@@ -1149,18 +1651,17 @@ void setup(void)
 
   delay(1000);
 
-  mdns_name = "floathub";
-  int attempts = 0, max_attempts = 10;
-  while((!MDNS.begin (mdns_name.c_str(), WiFi.localIP())) && attempts < max_attempts)
-  {
-    debug_out("MDNS died off ... will retry");
-    delay(500);
-    attempts++;
-    if(attempts >= max_attempts)
-    {
-      debug_out("Can't get MDNS up at all");
-    }
-  }
+
+  //
+  //	Run MDNS so we can resolve as floathub.local
+  //
+
+  kickMDNS();
+
+
+  //
+  // Try and redirect _all_ hostnames on the private network to the Web Server
+  //
 
   dns_server.setErrorReplyCode(DNSReplyCode::NoError);
   dns_server.start(53, "*", WiFi.softAPIP());
@@ -1178,7 +1679,7 @@ void houseKeeping()
   {
     if(now - cookies[i].time > 60 * 1000 * 8 && cookies[i].valid == true)	// 8 minute cookie timeout
     {
-       Serial.println("Nuked a cookie");
+       debug_out("Nuked a cookie");
        nukeCookie(i);
     }
   }
