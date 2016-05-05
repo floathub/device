@@ -121,19 +121,39 @@ COOKIES cookies[MAX_COOKIES];
 
 
 
-unsigned long house_keeping_interval = 3000;		// Do house keeping every 5 seconds
+unsigned long house_keeping_interval     	   = 3000;  // Do house keeping every 3 seconds
+unsigned long nmea_housekeeping_interval 	   = 1000;  // Check on nmea connections every second	
+unsigned long virtual_serial_housekeeping_interval = 200;   // Check on virtual serial connections every 2/10's of a second
+
 unsigned long house_keeping_previous_timestamp = 0;
+unsigned long nmea_housekeeping_previous_timestamp = 0;
+unsigned long virtual_serial_housekeeping_previous_timestamp = 0;
+
+//
+// Servers of many types and size for such a small little microprocessor :-)
+//
 
 
+ESP8266WebServer  web_server ( 80 );
+DNSServer	  dns_server;
+WiFiServer       *nmea_server = 0;
+WiFiClient        nmea_client[4];
+WiFiServer	 *virtual_serial_server = 0;
+WiFiClient	  virtual_serial_client;
 
-ESP8266WebServer web_server ( 80 );
-DNSServer	dns_server;
-
+ 
 void debug_out(String message)
 {
   Serial.print("FHD: ");
   Serial.print(message);
   Serial.print("\r\n");
+
+  if(virtual_serial_client && virtual_serial_client.connected())
+  {
+    virtual_serial_client.print("FHD: ");
+    virtual_serial_client.print(message);
+    virtual_serial_client.print("\r\n");
+  }
 }
 
 
@@ -639,6 +659,63 @@ bool isOnPrivateNetwork()
   return false;
 }
 
+void nukeNmeaServer()
+{
+
+  for(int i = 0; i < 4; i++)
+  {
+    if(nmea_client[i])
+    {
+      nmea_client[i].stop();
+    }
+  }
+  if(nmea_server)
+  {
+    nmea_server->close();
+    delete nmea_server;
+    nmea_server = 0;	
+  }
+
+}
+
+void fireUpNmeaServer()
+{
+  nukeNmeaServer();
+  nmea_server = new WiFiServer(nmea_mux_port);
+  nmea_server->begin();
+  nmea_server->setNoDelay(true);
+
+}
+
+
+void nukeVirtualSerialServer()
+{
+
+  if(virtual_serial_client)
+  {
+    virtual_serial_client.stop();
+  }
+  if(virtual_serial_server)
+  {
+    virtual_serial_server->close();
+    delete virtual_serial_server;
+    virtual_serial_server = 0;	
+  }
+
+}
+
+void fireUpVirtualSerialServer()
+{
+
+  nukeVirtualSerialServer();
+  virtual_serial_server = new WiFiServer(virtual_serial_port);
+  virtual_serial_server->begin();
+  virtual_serial_server->setNoDelay(true);
+
+}
+
+
+
 
 void spitOutIPInput(String &page, String name_stub, String label, const IPAddress& address)
 {
@@ -758,6 +835,23 @@ void handleLogin()
   page += FPSTR(HTTP_CLOSE);
 
   web_server.send ( 200, "text/html", page );
+}
+
+
+void handleReboot()
+{
+  debug_out(F("Enter handleReboot()"));
+  if(!isAuthenticated())
+  {
+    web_server.sendContent(FPSTR(HTTP_REDIRECT));
+    return;
+  }
+
+  sendPleaseWait("/");
+
+  delay(200);
+  ESP.restart();  
+
 }
 
 
@@ -1151,6 +1245,7 @@ void handleOther()
     return;
   }
 
+  bool nmea_changed = false;
   String error_message = "";
 
   if(web_server.arg("savebutton") == "True")
@@ -1187,11 +1282,13 @@ void handleOther()
     {
       nmea_mux_on = true;
       something_changed = true;
+      nmea_changed = true;
     }
-    else if(nmea_mux_on)
+    else if(nmea_mux_on && web_server.arg("muxon") != "yes")
     {
       nmea_mux_on = false;
       something_changed = true;
+      nmea_changed = true; 
     }
 
     if(nmea_mux_port != web_server.arg("muxport").toInt())
@@ -1199,6 +1296,7 @@ void handleOther()
       nmea_mux_port = web_server.arg("muxport").toInt();
       checkPort(nmea_mux_port);
       something_changed = true;
+      nmea_changed = true;
     }
     if(web_server.arg("localname").length() < 1)
     {
@@ -1214,6 +1312,18 @@ void handleOther()
     if(something_changed)
     {
       write_eeprom_memory();
+    }
+    if(nmea_changed)
+    {
+      error_message += F("Device reboot recommended for NMEA port changes");
+      if(nmea_mux_on)
+      {
+        fireUpNmeaServer();
+      }
+      else
+      {
+        nukeNmeaServer();
+      }
     }
   }
 
@@ -1251,6 +1361,10 @@ void handleOther()
 
 
   page += FPSTR(HTTP_HOMEB);
+  if(nmea_changed)
+  {
+    page += FPSTR(HTTP_RBOOT);
+  }
   page += FPSTR(HTTP_CLOSE);
 
   web_server.send ( 200, "text/html", page );
@@ -1276,10 +1390,13 @@ void handleAdvanced()
   }
 
   String error_message = "";
+  bool virtual_serial_changed = false;
 
 
   if(web_server.arg("savebutton") == "True")
   {
+
+
     if(web_server.arg("phoneon") == "yes")
     {
       phone_home_on = true;
@@ -1299,18 +1416,38 @@ void handleAdvanced()
     float_hub_server_port = web_server.arg("fhport").toInt();
     checkPort(float_hub_server_port);
 
-    if(web_server.arg("vserialon") == "yes")
+    if(web_server.arg("vserialon") == "yes" && !virtual_serial_on)
     {
       virtual_serial_on = true;
+      virtual_serial_changed = true;
     }
-    else
+    else if (virtual_serial_on && web_server.arg("vserialon") != "yes")
     {
       virtual_serial_on = false; 
+      virtual_serial_changed = true;
+   
     }  
 
-    virtual_serial_port = web_server.arg("vsport").toInt();
-    checkPort(virtual_serial_port);
+    if(virtual_serial_port != web_server.arg("vsport").toInt())
+    {
+      virtual_serial_port = web_server.arg("vsport").toInt();
+      checkPort(virtual_serial_port);
+      virtual_serial_changed = true;
+    }
     write_eeprom_memory(); 
+
+    if(virtual_serial_changed)
+    {
+      error_message += F("Device reboot recommended");
+      if(virtual_serial_on)
+      {
+        fireUpVirtualSerialServer();
+      }
+      else
+      {
+        nukeVirtualSerialServer();
+      }
+    }
 
   }
 
@@ -1351,6 +1488,10 @@ void handleAdvanced()
 
 
   page += FPSTR(HTTP_HOMEB);
+  if(virtual_serial_changed)
+  {
+    page += FPSTR(HTTP_RBOOT);
+  }
   page += FPSTR(HTTP_CLOSE);
 
   web_server.send ( 200, "text/html", page );
@@ -1504,8 +1645,6 @@ void handleFavicon()
 }
 
 
-
-
 void setup(void)
 {
   Serial.begin ( 115200 );
@@ -1542,72 +1681,6 @@ void setup(void)
 
   read_eeprom_memory();
 
-/*
-  //public_wifi_ssid = "SuperMOO";
-  public_wifi_ssid = "NoWorky";
-  public_wifi_password = "VeryS1lly";
-
-  //public_wifi_ssid = "FunkyChicken";
-  //public_wifi_password = "tits";
-
-  float_hub_id = "outofbox";
-  for(int i = 0; i < 16; i++)
-  {
-    float_hub_aes_key[i] = i;
-  }
-
-  public_ip_is_static = false;
-  public_static_ip   = IPAddress(192,168,1,42);
-  public_static_gate = IPAddress(192,168,1,1);
-  public_static_mask = IPAddress(255,255,255,0);
-  public_static_dns  = IPAddress(192,168,1,1);
-
-  web_interface_username = "floathub";
-  web_interface_password = "floathub";
- 
-  nmea_mux_on = true;
-  nmea_mux_port = 2319;
-
-  phone_home_on = true;
-  float_hub_server = "fdr.floathub.net";
-  float_hub_server_port = 50003;
-  virtual_serial_on = false;
-  virtual_serial_port = 1923;
-*/
-
-  
-  //ESP.eraseConfig();
-//  byte mac_array[6];
-//  WiFi.softAPmacAddress(mac_array);
-
-/*
-  Serial.print("MAC: ");
-  Serial.print(mac_array[5],HEX);
-  Serial.print(":");
-  Serial.print(mac_array[4],HEX);
-  Serial.print(":");
-  Serial.print(mac_array[3],HEX);
-  Serial.print(":");
-  Serial.print(mac_array[2],HEX);
-  Serial.print(":");
-  Serial.print(mac_array[1],HEX);
-  Serial.print(":");
-  Serial.println(mac_array[0],HEX);
-*/
-
-//  private_wifi_password = "FloatHub"; // min 8
-
-//  private_wifi_ssid = "FloatHub_";
-//  private_wifi_ssid += String(mac_array[3], HEX);
-//  private_wifi_ssid += String(mac_array[4], HEX);
-//  private_wifi_ssid += String(mac_array[5], HEX);
-
-
-//  debug_out(String("Creating AP with SSID of ") + private_wifi_ssid);
-	
-//  Serial.print("I think I want to create a WiFi network called: ");
-//  Serial.println(private_wifi_ssid);
-
   debug_out("");
   debug_out(String("Boot: ") + String(boot_counter) + String(", public_wifi_ssid = ") + public_wifi_ssid);
 
@@ -1637,6 +1710,7 @@ void setup(void)
   web_server.on ( "/other", handleOther );
   web_server.on ( "/advanced", handleAdvanced );
   web_server.on ( "/account", handleAccount );
+  web_server.on ( "/reboot", handleReboot );
   web_server.onNotFound(handleLogin);
 
   //
@@ -1666,12 +1740,126 @@ void setup(void)
   dns_server.setErrorReplyCode(DNSReplyCode::NoError);
   dns_server.start(53, "*", WiFi.softAPIP());
 
+
+  //
+  // Bring up nmea_server
+  //
+
+  if(nmea_mux_on)
+  {
+    fireUpNmeaServer();
+  }
+  else
+  {
+    nukeNmeaServer();
+  }
+
+  //
+  // Bring up Virtual Serial Server
+  //
+
+  if(virtual_serial_on)
+  {
+    fireUpVirtualSerialServer();
+  }
+  else
+  {
+    nukeVirtualSerialServer();
+  }
 }
 
 
-void houseKeeping()
+
+
+void nmeaHouseKeeping()
 {
 
+  if(!nmea_server || !nmea_mux_on )
+  {
+    return;
+  }
+
+  int i;
+
+  //
+  //  Kill any dead nmea clients
+  //
+
+  for(i = 0; i < 4; i++)
+  {
+    if(nmea_client[i] && !nmea_client[i].connected())
+    {
+      nmea_client[i].stop(); 
+      Serial.print("Nuked nmea client at position ");
+      Serial.println(i);
+    }
+  }
+  //
+  //	Add in any new clients
+  //
+
+  while(nmea_server->hasClient())
+  { 
+    for(i=0; i < 4; i++)
+    {
+      if(!nmea_client[i])
+      {
+        break;
+      } 
+    }
+    if(i > 3)
+    {
+      i = 0;
+    }
+    nmea_client[i].stop();
+    nmea_client[i] = nmea_server->available();
+    Serial.print("Added nmea client at position ");
+    Serial.println(i);
+  }
+
+  //
+  //  Temp testing
+  //
+
+  for(i = 0; i < 4; i++)
+  {
+    if(nmea_client[i])
+    {
+      nmea_client[i].println(F("McLovin"));
+    }
+  }
+}
+
+void virtualSerialHouseKeeping()
+{
+
+  if(!virtual_serial_server || !virtual_serial_on )
+  {
+    return;
+  }
+
+  if(virtual_serial_client && !virtual_serial_client.connected())
+  {
+    virtual_serial_client.stop(); 
+  }
+
+  //
+  //	Add in any new clients
+  //
+
+  if(virtual_serial_server->hasClient())
+  { 
+    if(virtual_serial_client)
+    {
+      virtual_serial_client.stop(); 
+    }
+    virtual_serial_client = virtual_serial_server->available();
+  }
+
+}
+
+void houseKeeping()
+{
   debug_out(String(F("WiFi.status()=")) + WiFi.status() + String(F(", IP address: ")) + WiFi.localIP()); 
 
   long now = millis();
@@ -1679,7 +1867,7 @@ void houseKeeping()
   {
     if(now - cookies[i].time > 60 * 1000 * 8 && cookies[i].valid == true)	// 8 minute cookie timeout
     {
-       debug_out("Nuked a cookie");
+       //debug_out("Nuked a cookie"
        nukeCookie(i);
     }
   }
@@ -1700,7 +1888,22 @@ void loop(void)
     house_keeping_previous_timestamp = current_timestamp;
     houseKeeping();
 
+  }
+ 
+  if(current_timestamp - nmea_housekeeping_previous_timestamp > nmea_housekeeping_interval)
+  {
+    nmea_housekeeping_previous_timestamp = current_timestamp;
+    nmeaHouseKeeping();
+
   } 
+
+  if(current_timestamp - virtual_serial_housekeeping_previous_timestamp > virtual_serial_housekeeping_interval)
+  {
+    virtual_serial_housekeeping_previous_timestamp = current_timestamp;
+    virtualSerialHouseKeeping();
+
+  } 
+
   dns_server.processNextRequest();
   web_server.handleClient();
 }
