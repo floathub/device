@@ -28,8 +28,9 @@
 #include <ESP8266mDNS.h>
 #include <DNSServer.h>
 #include <EEPROM.h>
+#include <FS.h>
 #include "static.h"
-
+#include "version_defines.h"
 
 //
 //	Need access to lower level calls to be able to turn DHCP on and off
@@ -49,7 +50,14 @@ extern "C" {
 }
 
 
+//
+//	Debugging options
+//
 
+#define HTTP_DEBUG_ON
+#define MDNS_DEBUG_ON
+#define STAT_DEBUG_ON
+#define INPT_DEBUG_ON
 
 //
 //  Global defines
@@ -71,6 +79,7 @@ String private_wifi_ssid;
 String private_wifi_password;
 String mdns_name;
 bool	public_ip_is_static = false;
+bool	called_mdns_after_connection = false;
 IPAddress public_static_ip;
 IPAddress public_static_gate;
 IPAddress public_static_mask;
@@ -123,12 +132,14 @@ COOKIES cookies[MAX_COOKIES];
 
 unsigned long house_keeping_interval     	   = 3000;  // Do house keeping every 3 seconds
 unsigned long nmea_housekeeping_interval 	   = 1000;  // Check on nmea connections every second	
-unsigned long virtual_serial_housekeeping_interval = 200;   // Check on virtual serial connections every 2/10's of a second
+unsigned long virtual_serial_housekeeping_interval = 500;   // Check on virtual serial connections every 1/2 second
+unsigned long console_read_interval		   = 300;   // Check on "console" (mostly stuff from main board) every 3/10's of a second
+
 
 unsigned long house_keeping_previous_timestamp = 0;
 unsigned long nmea_housekeeping_previous_timestamp = 0;
 unsigned long virtual_serial_housekeeping_previous_timestamp = 0;
-
+unsigned long console_previous_timestamp = 0; 
 //
 // Servers of many types and size for such a small little microprocessor :-)
 //
@@ -141,21 +152,87 @@ WiFiClient        nmea_client[4];
 WiFiServer	 *virtual_serial_server = 0;
 WiFiClient	  virtual_serial_client;
 
+//
+//	Some buffers for reading the above
+//
+
+#define MAX_CONSOLE_BUFFER 100
+
+String  console_read_buffer;
+String	virtual_serial_read_buffer;
  
-void debug_out(String message)
+void help_info(String some_info)
 {
-  Serial.print("FHD: ");
-  Serial.print(message);
-  Serial.print("\r\n");
+  Serial.print(F("$FHH:"));
+  Serial.print(float_hub_id);
+  Serial.print(F(":"));
+  Serial.print(FLOATHUB_PROTOCOL_VERSION);
+  Serial.print(F("$    "));
+  Serial.println(some_info);
 
   if(virtual_serial_client && virtual_serial_client.connected())
   {
-    virtual_serial_client.print("FHD: ");
-    virtual_serial_client.print(message);
-    virtual_serial_client.print("\r\n");
+    virtual_serial_client.print(F("$FHH:"));
+    virtual_serial_client.print(float_hub_id);
+    virtual_serial_client.print(F(":"));
+    virtual_serial_client.print(FLOATHUB_PROTOCOL_VERSION);
+    virtual_serial_client.print(F("$    "));
+    virtual_serial_client.println(some_info);
   }
 }
 
+
+void debug_info_core(String some_info)
+{
+  some_info.replace('\n','|');
+  some_info.replace('\r','|');
+  Serial.print(F("$FHD:"));
+  Serial.print(float_hub_id);
+  Serial.print(F(":"));
+  Serial.print(FLOATHUB_PROTOCOL_VERSION);
+  Serial.print(F("$    "));
+  Serial.print(some_info);
+  if(virtual_serial_client && virtual_serial_client.connected())
+  {
+    virtual_serial_client.print(F("$FHD:"));
+    virtual_serial_client.print(float_hub_id);
+    virtual_serial_client.print(F(":"));
+    virtual_serial_client.print(FLOATHUB_PROTOCOL_VERSION);
+    virtual_serial_client.print(F("$    "));
+    virtual_serial_client.print(some_info);
+  }
+}
+
+void debug_info(String some_info)
+{
+  debug_info_core(some_info);
+  Serial.println();
+  if(virtual_serial_client && virtual_serial_client.connected())
+  {
+    virtual_serial_client.println();
+  }
+}
+
+void debug_info(String some_info, float x)
+{
+  debug_info_core(some_info);
+  Serial.println(x);
+  if(virtual_serial_client && virtual_serial_client.connected())
+  {
+    virtual_serial_client.println(x);
+  }
+}
+
+
+void debug_info(String some_info, int x)
+{
+  debug_info_core(some_info);
+  Serial.println(x);
+  if(virtual_serial_client && virtual_serial_client.connected())
+  {
+    virtual_serial_client.println(x);
+  }
+}
 
 void nukeCookie(int which_one)
 {
@@ -638,13 +715,17 @@ bool isAuthenticated()
            //
           
            cookies[i].time = millis();
-           debug_out(F("Yay, cookie hitttttt"));
+  	   #ifdef HTTP_DEBUG_ON
+           debug_info(F("Yay, Cookie hitttttt"));
+           #endif
            return true;
          }
       }
     }
   }
-  debug_out(F("Authentication Failed"));
+  #ifdef HTTP_DEBUG_ON
+  debug_info(F("Authentication Failed"));
+  #endif
   return false;	
 }
 
@@ -688,6 +769,18 @@ void fireUpNmeaServer()
 }
 
 
+void kickNMEA()
+{
+  if(nmea_mux_on)
+  {
+    fireUpNmeaServer();
+  }
+  else
+  {
+    nukeNmeaServer();
+  }
+}
+
 void nukeVirtualSerialServer()
 {
 
@@ -714,7 +807,17 @@ void fireUpVirtualSerialServer()
 
 }
 
-
+void kickVirtualSerial()
+{
+  if(virtual_serial_on)
+  {
+    fireUpVirtualSerialServer();
+  }
+  else
+  {
+    nukeVirtualSerialServer();
+  }
+}
 
 
 void spitOutIPInput(String &page, String name_stub, String label, const IPAddress& address)
@@ -763,12 +866,16 @@ void sendPleaseWait(String where_to_go)
 void handleLogin()
 {
 
-
-  debug_out(F("Enter handleLogin()"));
+  #ifdef HTTP_DEBUG_ON
+  debug_info(F("Enter handleLogin()"));
+  #endif
 
   if (web_server.hasArg("DISCONNECT"))
   {
-    debug_out(F("Disconnection"));
+    #ifdef HTTP_DEBUG_ON
+    debug_info(F("Disconnection"));
+    #endif
+
     String header = "HTTP/1.1 301 OK\r\nSet-Cookie: FHSESSION=0\r\nLocation: /login\r\nCache-Control: no-cache\r\n\r\n";
     web_server.sendContent(header);
     return;
@@ -777,7 +884,11 @@ void handleLogin()
   {
       String header = "HTTP/1.1 301 OK\r\nLocation: /\r\nCache-Control: no-cache\r\n\r\n";
       web_server.sendContent(header);
-      debug_out(F("redirect already logged in"));
+
+      #ifdef HTTP_DEBUG_ON
+      debug_info(F("redirect already logged in"));
+      #endif
+
       return;
   }
   if (web_server.hasArg("USER") && web_server.hasArg("PASS"))
@@ -809,7 +920,11 @@ void handleLogin()
 
       String header = "HTTP/1.1 301 OK\r\nSet-Cookie: FHSESSION=" + String(cookies[cookie_to_use].random_number) + "\r\nLocation: /\r\nCache-Control: no-cache\r\n\r\n";
       web_server.sendContent(header);
-      debug_out("Log in Successful");
+
+      #ifdef HTTP_DEBUG_ON
+      debug_info("Log in Successful");
+      #endif
+
       return;
     }
   }
@@ -840,7 +955,10 @@ void handleLogin()
 
 void handleReboot()
 {
-  debug_out(F("Enter handleReboot()"));
+  #ifdef HTTP_DEBUG_ON
+  debug_info(F("Enter handleReboot()"));
+  #endif
+
   if(!isAuthenticated())
   {
     web_server.sendContent(FPSTR(HTTP_REDIRECT));
@@ -859,9 +977,10 @@ void handleReboot()
 
 void handleRoot()
 {
+  #ifdef HTTP_DEBUG_ON
+  debug_info(F("Enter handleRoot()"));
+  #endif
 
-
-  debug_out(F("Enter handleRoot()"));
   if(!isAuthenticated())
   {
     web_server.sendContent(FPSTR(HTTP_REDIRECT));
@@ -869,27 +988,18 @@ void handleRoot()
   }
 
   WiFiClient client = web_server.client();
-  debug_out("Request from " + client.remoteIP());
 
+  #ifdef HTTP_DEBUG_ON
+  debug_info("Request from " + client.remoteIP());
+  #endif
 
   String page = FPSTR(HTTP_INITA);
   page += FPSTR(HTTP_TITLE);
   page += FPSTR(HTTP_STYLE);
   page += FPSTR(HTTP_DIV_A);
 
-  String private_address;
-  IPAddress private_ip = WiFi.softAPIP();
-  private_address = String(private_ip[0]) + "." + 
-                    String(private_ip[1]) + "." +
-                    String(private_ip[2]) + "." +
-                    String(private_ip[3]);
-
-  String public_address;
-  IPAddress public_ip = WiFi.localIP();
-  public_address =  String(public_ip[0]) + "." + 
-                    String(public_ip[1]) + "." +
-                    String(public_ip[2]) + "." +
-                    String(public_ip[3]);
+  String private_address = WiFi.softAPIP().toString();
+  String public_address = WiFi.localIP().toString();
 
   page += FPSTR(HTTP_LOGOA);
 
@@ -928,9 +1038,10 @@ void handleRoot()
 
 void handlePrivateWireless()
 {
+  #ifdef HTTP_DEBUG_ON
+  debug_info(F("Enter handlePrivateWireless()"));
+  #endif
 
-
-  debug_out(F("Enter handlePrivateWireless()"));
   if(!isAuthenticated())
   {
     web_server.sendContent(FPSTR(HTTP_REDIRECT));
@@ -1005,22 +1116,64 @@ void handlePrivateWireless()
 void kickMDNS()
 {
   int attempts = 0;
+  #ifdef MDNS_DEBUG_ON
+  debug_info("MDNS binding " + mdns_name + " --> " + WiFi.localIP().toString());
+  #endif
+
   while((!MDNS.begin (mdns_name.c_str(), WiFi.localIP())) && attempts < 12)
   {
-    debug_out("MDNS died off ... will retry");
+    #ifdef MDNS_DEBUG_ON
+    debug_info("MDNS died off ... will retry");
+    #endif
+
     delay(500);
     attempts++;
     if(attempts >= 12)
     {
-      debug_out("Can't get MDNS up at all");
+      #ifdef MDNS_DEBUG_ON
+      debug_info("Can't get MDNS up at all");
+      #endif
     }
   }
 }
 
+void kickWiFi()
+{
+  WiFi.disconnect();
+  WiFi.mode(WIFI_OFF);
+
+
+  WiFi.mode(WIFI_AP_STA);
+  WiFi.begin(public_wifi_ssid.c_str(), public_wifi_password.c_str());
+  WiFi.softAP(private_wifi_ssid.c_str(), private_wifi_password.c_str());
+  byte attempts = 0; 
+  while (WiFi.status() != WL_CONNECTED && attempts < 24)
+  {
+    delay(250);
+    attempts++;
+  }
+
+  wifi_station_dhcpc_stop();
+  if(public_ip_is_static)
+  {
+    WiFi.config(public_static_ip, public_static_gate, public_static_mask, public_static_dns);
+  }
+  else
+  {
+    wifi_station_dhcpc_start();
+  }
+
+  called_mdns_after_connection = false;
+	  
+}
+
+
 void handlePublicWireless()
 {
+  #ifdef HTTP_DEBUG_ON
+  debug_info(F("Enter handlePublicWireless()"));
+  #endif
 
-  debug_out(F("Enter handlePublicWireless()"));
   if(!isAuthenticated())
   {
     web_server.sendContent(FPSTR(HTTP_REDIRECT));
@@ -1064,25 +1217,7 @@ void handlePublicWireless()
           
           write_eeprom_memory();
           sendPleaseWait("/public");
-
-          WiFi.disconnect();
-          WiFi.mode(WIFI_OFF);
-
-
-          WiFi.mode(WIFI_AP_STA);
-          WiFi.begin(public_wifi_ssid.c_str(), public_wifi_password.c_str());
-          byte attempts = 0; 
-          while (WiFi.status() != WL_CONNECTED && attempts < 24)
-          {
-            delay(500);
-            attempts++;
-          }
-
-	  wifi_station_dhcpc_stop();
-	  wifi_station_dhcpc_start();
-          delay(500);
-	  
-          kickMDNS();
+ 	  kickWiFi();
           return;
         }
         else
@@ -1107,23 +1242,8 @@ void handlePublicWireless()
 
 
           write_eeprom_memory();
-
-          sendPleaseWait("http://" + web_server.arg("local1") + "." + web_server.arg("local2") + "." +  web_server.arg("local3") + "." + web_server.arg("local4") + "/public");
-
-
-          
-
-          WiFi.disconnect();
-          WiFi.mode(WIFI_OFF);
-          WiFi.mode(WIFI_AP_STA);
-          WiFi.begin(public_wifi_ssid.c_str(), public_wifi_password.c_str());
-          byte attempts = 0; 
-          while (WiFi.status() != WL_CONNECTED && attempts < 24)
-          {
-            delay(500);
-            attempts++;
-          }
-          WiFi.config(public_static_ip, public_static_gate, public_static_mask, public_static_dns);
+          sendPleaseWait("http://" + public_static_ip.toString() + "/public");
+          kickWiFi();
           return;
         }
       }
@@ -1238,7 +1358,10 @@ void handlePublicWireless()
 
 void handleOther()
 {
-  debug_out(F("Enter handleOther()"));
+  #ifdef HTTP_DEBUG_ON
+  debug_info(F("Enter handleOther()"));
+  #endif
+
   if(!isAuthenticated())
   {
     web_server.sendContent(FPSTR(HTTP_REDIRECT));
@@ -1316,14 +1439,7 @@ void handleOther()
     if(nmea_changed)
     {
       error_message += F("Device reboot recommended for NMEA port changes");
-      if(nmea_mux_on)
-      {
-        fireUpNmeaServer();
-      }
-      else
-      {
-        nukeNmeaServer();
-      }
+      kickNMEA();
     }
   }
 
@@ -1378,8 +1494,9 @@ void handleAdvanced()
   // user must still first be authenticated like any other page.
   //
 
-
-  debug_out(F("Enter handleAdvanced()"));
+  #ifdef HTTP_DEBUG_ON
+  debug_info(F("Enter handleAdvanced()"));
+  #endif
 
 
   if(!isAuthenticated())
@@ -1439,14 +1556,7 @@ void handleAdvanced()
     if(virtual_serial_changed)
     {
       error_message += F("Device reboot recommended");
-      if(virtual_serial_on)
-      {
-        fireUpVirtualSerialServer();
-      }
-      else
-      {
-        nukeVirtualSerialServer();
-      }
+      kickVirtualSerial();
     }
 
   }
@@ -1500,9 +1610,10 @@ void handleAdvanced()
 
 void handleAccount()
 {
+  #ifdef HTTP_DEBUG_ON
+  debug_info(F("Enter handleAccount()"));
+  #endif
 
-
-  debug_out(F("Enter handleAccount()"));
   if(!isAuthenticated())
   {
     web_server.sendContent(FPSTR(HTTP_REDIRECT));
@@ -1644,9 +1755,68 @@ void handleFavicon()
   web_server.sendContent_P(FLOATHUB_FAVICON, sizeof(FLOATHUB_FAVICON) );
 }
 
+void displayCurrentVariables()
+{
+  String new_message = "v=";
+  new_message += FLOATHUB_PROTOCOL_VERSION;
+  new_message += ".";
+  new_message += FLOATHUB_ENCRYPT_VERSION;
+  
+  new_message += ",m=";
+  new_message += FLOATHUB_MODEL_DESCRIPTION;
+  new_message += ",b=";
+  new_message += boot_counter;
+  help_info(new_message);
+  new_message = "";
+
+  
+  help_info(String(F("i=")) + float_hub_id); 
+  help_info(String(F("s=")) + float_hub_server); 
+  help_info(String(F("p=")) + float_hub_server_port); 
+
+  new_message = "k=";
+  for(int i = 0; i < 16; i++)
+  {
+    if(float_hub_aes_key[i] < 16)
+    {
+      new_message += "0";
+    }
+    new_message += String(float_hub_aes_key[i], HEX);
+  }
+  help_info(new_message);
+
+
+  help_info(String(F("w=")) + public_wifi_ssid); 
+  help_info(String(F("W=")) + public_wifi_password); 
+  help_info(String(F("x=")) + private_wifi_ssid); 
+  help_info(String(F("X=")) + private_wifi_password); 
+  help_info(String(F("d=")) + mdns_name); 
+  help_info(String(F("F=")) + public_ip_is_static); 
+  help_info(String(F("I=")) + public_static_ip.toString()); 
+  help_info(String(F("G=")) + public_static_gate.toString()); 
+  help_info(String(F("M=")) + public_static_mask.toString()); 
+  help_info(String(F("D=")) + public_static_dns.toString()); 
+  help_info(String(F("N=")) + nmea_mux_on); 
+  help_info(String(F("n=")) + nmea_mux_port); 
+  help_info(String(F("u=")) + web_interface_username); 
+  help_info(String(F("U=")) + web_interface_password); 
+  help_info(String(F("P=")) + phone_home_on); 
+  help_info(String(F("Z=")) + virtual_serial_on); 
+  help_info(String(F("z=")) + virtual_serial_port); 
+
+}
 
 void setup(void)
 {
+
+  // 
+  // Reserve some variable space
+  //
+
+  console_read_buffer.reserve(MAX_CONSOLE_BUFFER);
+  virtual_serial_read_buffer.reserve(MAX_CONSOLE_BUFFER);
+
+
   Serial.begin ( 115200 );
 
   //
@@ -1673,7 +1843,7 @@ void setup(void)
     a = EEPROM.read(i);
     if(a != 42)
     {
-      debug_out("Virgin Module");
+      debug_info("Virgin Module");
       init_eeprom_memory();
       break;
     }
@@ -1681,21 +1851,15 @@ void setup(void)
 
   read_eeprom_memory();
 
-  debug_out("");
-  debug_out(String("Boot: ") + String(boot_counter) + String(", public_wifi_ssid = ") + public_wifi_ssid);
+  help_info("");
+  displayCurrentVariables();
 
 
   //
   // Fire up the WiFi
   //
 
-  WiFi.mode(WIFI_AP_STA);
-  WiFi.begin(public_wifi_ssid.c_str(), public_wifi_password.c_str());
-  WiFi.softAP(private_wifi_ssid.c_str(), private_wifi_password.c_str());
-  if(public_ip_is_static)
-  {
-    WiFi.config(public_static_ip, public_static_gate, public_static_mask, public_static_dns);
-  }
+  kickWiFi();
 
   //
   // Bring up the web server
@@ -1727,48 +1891,50 @@ void setup(void)
 
 
   //
-  //	Run MDNS so we can resolve as floathub.local
-  //
-
-  kickMDNS();
-
-
-  //
-  // Try and redirect _all_ hostnames on the private network to the Web Server
+  // Answer to floathub.local, even on the Private WiFi side
   //
 
   dns_server.setErrorReplyCode(DNSReplyCode::NoError);
-  dns_server.start(53, "*", WiFi.softAPIP());
+  dns_server.start(53, "floathub.local", WiFi.softAPIP());
 
 
   //
-  // Bring up nmea_server
+  // Bring up nmea_server if need be
   //
 
-  if(nmea_mux_on)
-  {
-    fireUpNmeaServer();
-  }
-  else
-  {
-    nukeNmeaServer();
-  }
+  kickNMEA();
 
   //
   // Bring up Virtual Serial Server
   //
 
-  if(virtual_serial_on)
-  {
-    fireUpVirtualSerialServer();
-  }
-  else
-  {
-    nukeVirtualSerialServer();
-  }
+  kickVirtualSerial();
+
+
+  uint32 flash_id = spi_flash_get_id();
+
+  Serial.print("I See the flash id as ");
+  Serial.println(flash_id);
+
+  Serial.print("And other method sees ");
+  Serial.println(ESP.getFlashChipId());
+
+
 }
 
-
+void echoNMEA(String a_message)
+{
+  if(nmea_mux_on)
+  {
+    for(int i = 0; i < 4; i++)
+    {
+      if(nmea_client[i])
+      {
+        nmea_client[i].println(a_message);
+      }
+    }
+  }
+}
 
 
 void nmeaHouseKeeping()
@@ -1821,14 +1987,498 @@ void nmeaHouseKeeping()
   //  Temp testing
   //
 
-  for(i = 0; i < 4; i++)
+  echoNMEA("McLovin");
+}
+
+
+void processNewStringValue(String preamble, String &the_string, String new_value)
+{
+  if(new_value.length() > 32)
   {
-    if(nmea_client[i])
+    new_value = new_value.substring(0,32);
+  }
+  the_string = new_value;
+  write_eeprom_memory();
+  help_info(preamble + the_string);
+}
+
+
+void processNewPortValue(String preamble, unsigned int &the_port, int new_value)
+{
+  the_port = new_value;
+  write_eeprom_memory();
+  help_info(preamble + the_port);
+}
+
+void processNewFlagValue(String preamble, bool &the_flag, int new_value)
+{
+  the_flag = new_value;
+  write_eeprom_memory();
+  help_info(preamble + the_flag);
+}
+
+void processNewIPAddress(String preamble, IPAddress &the_address, IPAddress new_address)
+{
+  the_address = new_address;
+  write_eeprom_memory();
+  help_info(preamble + the_address.toString());
+}
+
+
+
+void parseInput(String &the_input)
+{
+  int i;
+  if(the_input.charAt(0) == 'v')
+  {
+    displayCurrentVariables();
+  }
+  if(the_input.startsWith("factory"))
+  {
+    help_info("Doing factory reset ...");
+    //init_eeprom_memory();
+    //read_eeprom_memory();
+  }
+  else if(the_input.startsWith("E=") && the_input.length() >= 5) // Minimum NMEA sentence length (?)
+  {
+    echoNMEA(the_input.substring(2));
+  }
+  #ifdef INPT_DEBUG_ON
+  else if(the_input.startsWith("E="))
+  {
+    debug_info(F("Bad NMEA"));
+  }
+  #endif
+  
+  else if(the_input.startsWith("i=") && the_input.length() >= 10)
+  {        
+    bool bad_chars = false;
+        
+    for(i=0; i < 8; i++)
     {
-      nmea_client[i].println(F("McLovin"));
+      byte tester = the_input.charAt(2+i);
+      if(tester < 48 || (tester > 57 && tester < 65) || (tester > 90 && tester < 97 ) || tester > 122)
+      {
+        bad_chars = true;
+        #ifdef INPT_DEBUG_ON
+        debug_info(F("Bad input"));
+        #endif
+        break;
+      }
+    }
+    if(!bad_chars)
+    {
+      processNewStringValue("i=", float_hub_id, the_input.substring(2,10));
     }
   }
+  #ifdef INPT_DEBUG_ON
+  else if(the_input.startsWith("i="))
+  {
+    debug_info(F("Short input"));
+  }
+  #endif
+
+  else if(the_input.startsWith("s=") && the_input.length() >= 3)
+  {        
+    processNewStringValue("s=", float_hub_server, the_input.substring(2));
+  }
+  #ifdef INPT_DEBUG_ON
+  else if(the_input.startsWith("s="))
+  {
+    debug_info(F("Short input"));
+  }
+  #endif
+
+  else if(the_input.startsWith("p=") && the_input.length() >= 3)
+  {
+    int new_value = the_input.substring(2).toInt();
+    if(new_value > 0 && new_value < 65535)
+    { 	
+      processNewPortValue("p=", float_hub_server_port, new_value);
+    }
+    else
+    {
+      #ifdef INPT_DEBUG_ON
+      debug_info(F("Bad number"));
+      #endif
+    }
+  }
+  #ifdef INPT_DEBUG_ON
+  else if(the_input.startsWith("p="))
+  {
+    debug_info(F("Short input"));
+  }
+  #endif
+
+  else if(the_input.startsWith("w=") && the_input.length() >= 3)
+  {        
+    processNewStringValue("w=", public_wifi_ssid, the_input.substring(2));
+    kickWiFi();
+  }
+  #ifdef INPT_DEBUG_ON
+  else if(the_input.startsWith("w="))
+  {
+    debug_info(F("Short input"));
+  }
+  #endif
+
+  else if(the_input.startsWith("W=") && the_input.length() >= 10)
+  {        
+    processNewStringValue("W=", public_wifi_password, the_input.substring(2));
+    kickWiFi();
+  }
+  #ifdef INPT_DEBUG_ON
+  else if(the_input.startsWith("W="))
+  {
+    debug_info(F("Short input"));
+  }
+  #endif
+
+  else if(the_input.startsWith("x=") && the_input.length() >= 3)
+  {        
+    processNewStringValue("x=", private_wifi_ssid, the_input.substring(2));
+    kickWiFi();
+  }
+  #ifdef INPT_DEBUG_ON
+  else if(the_input.startsWith("x="))
+  {
+    debug_info(F("Short input"));
+  }
+  #endif
+
+  else if(the_input.startsWith("X=") && the_input.length() >= 10)
+  {        
+    processNewStringValue("X=", private_wifi_password, the_input.substring(2));
+    kickWiFi();
+  }
+  #ifdef INPT_DEBUG_ON
+  else if(the_input.startsWith("X="))
+  {
+    debug_info(F("Short input"));
+  }
+  #endif
+
+  else if(the_input.startsWith("d=") && the_input.length() >= 3)
+  {        
+    processNewStringValue("d=", mdns_name, the_input.substring(2));
+    kickMDNS();
+  }
+  #ifdef INPT_DEBUG_ON
+  else if(the_input.startsWith("d="))
+  {
+    debug_info(F("Short input"));
+  }
+  #endif
+
+  else if(the_input.startsWith("F=") && the_input.length() >= 3)
+  {        
+    int new_value = the_input.substring(2).toInt();
+    if(the_input[2] == '0' || the_input[2] == '1')
+    { 	
+      processNewFlagValue("F=", public_ip_is_static, new_value);
+      kickWiFi();
+    }
+    else
+    {
+      #ifdef INPT_DEBUG_ON
+      debug_info(F("Bad boolean"));
+      #endif
+    }
+  }
+  #ifdef INPT_DEBUG_ON
+  else if(the_input.startsWith("F="))
+  {
+    debug_info(F("Short input"));
+  }
+  #endif
+
+  else if(the_input.startsWith("I=") && the_input.length() >= 9)
+  {        
+    IPAddress new_address;
+    if(new_address.fromString(the_input.substring(2)))
+    { 	
+      processNewIPAddress("I=", public_static_ip, new_address);
+      if(public_ip_is_static)
+      {
+        kickWiFi();
+      }
+    }
+    else
+    {
+      #ifdef INPT_DEBUG_ON
+      debug_info(F("Bad IP"));
+      #endif
+    }
+  }
+  #ifdef INPT_DEBUG_ON
+  else if(the_input.startsWith("I="))
+  {
+    debug_info(F("Short input"));
+  }
+  #endif
+
+  else if(the_input.startsWith("G=") && the_input.length() >= 9)
+  {        
+    IPAddress new_address;
+    if(new_address.fromString(the_input.substring(2)))
+    { 	
+      processNewIPAddress("G=", public_static_gate, new_address);
+      if(public_ip_is_static)
+      {
+        kickWiFi();
+      }
+    }
+    else
+    {
+      #ifdef INPT_DEBUG_ON
+      debug_info(F("Bad IP"));
+      #endif
+    }
+  }
+  #ifdef INPT_DEBUG_ON
+  else if(the_input.startsWith("G="))
+  {
+    debug_info(F("Short input"));
+  }
+  #endif
+  else if(the_input.startsWith("M=") && the_input.length() >= 9)
+  {        
+    IPAddress new_address;
+    if(new_address.fromString(the_input.substring(2)))
+    { 	
+      processNewIPAddress("M=", public_static_mask, new_address);
+      if(public_ip_is_static)
+      {
+        kickWiFi();
+      }
+    }
+    else
+    {
+      #ifdef INPT_DEBUG_ON
+      debug_info(F("Bad IP"));
+      #endif
+    }
+  }
+  #ifdef INPT_DEBUG_ON
+  else if(the_input.startsWith("M="))
+  {
+    debug_info(F("Short input"));
+  }
+  #endif
+
+  else if(the_input.startsWith("D=") && the_input.length() >= 9)
+  {        
+    IPAddress new_address;
+    if(new_address.fromString(the_input.substring(2)))
+    { 	
+      processNewIPAddress("D=", public_static_dns, new_address);
+      if(public_ip_is_static)
+      {
+        kickWiFi();
+      }
+    }
+    else
+    {
+      #ifdef INPT_DEBUG_ON
+      debug_info(F("Bad IP"));
+      #endif
+    }
+  }
+  #ifdef INPT_DEBUG_ON
+  else if(the_input.startsWith("D="))
+  {
+    debug_info(F("Short input"));
+  }
+  #endif
+
+  else if(the_input.startsWith("k=") && the_input.length() == 34)
+  {        
+    bool bad_chars = false;
+    the_input.toLowerCase();
+
+    for(i=0; i < 32; i++)
+    {
+      if(!((the_input[i+2] >= '0' && the_input[i+2] <= '9') || (the_input[i+2] >= 'a' && the_input[i+2] <= 'f' )))          
+      {
+        help_info("Bad input");
+        bad_chars = true;
+        break;
+      }
+    }        
+    if(!bad_chars)
+    {
+      String display_string = "k=";
+      for(i = 0; i < 16; i++)
+      {
+        int new_value = 0;
+        if (the_input[2 + (i * 2)] <='9')
+        {
+          new_value = (the_input[2 + (i * 2)] - '0' ) * 16;
+        }
+        else
+        {
+          new_value = (the_input[2 + (i * 2)] - 'a' + 10) * 16;
+        }
+    
+        if (the_input[3 + (i * 2)] <='9')
+        {
+          new_value += the_input[3 + (i * 2)] - '0';
+        }
+        else
+        {
+          new_value += the_input[3 + (i * 2)] - 'a' + 10;
+        }
+
+        float_hub_aes_key[i] = new_value;
+        if(float_hub_aes_key[i] < 16)
+        {
+          display_string += "0";
+        }
+        display_string += String(float_hub_aes_key[i], HEX);
+      }
+      write_eeprom_memory();
+      help_info(display_string);
+    }    
+  }
+  #ifdef INPT_DEBUG_ON
+  else if(the_input.startsWith("k="))
+  {
+    debug_info(F("Bad length"));
+  }
+  #endif
+
+
+  else if(the_input.startsWith("N=") && the_input.length() >= 3)
+  {        
+    int new_value = the_input.substring(2).toInt();
+    if(the_input[2] == '0' || the_input[2] == '1')
+    { 	
+      processNewFlagValue("N=", nmea_mux_on, new_value);
+      kickNMEA();      
+    }
+    else
+    {
+      #ifdef INPT_DEBUG_ON
+      debug_info(F("Bad boolean"));
+      #endif
+    }
+  }
+  #ifdef INPT_DEBUG_ON
+  else if(the_input.startsWith("N="))
+  {
+    debug_info(F("Short input"));
+  }
+  #endif
+
+  else if(the_input.startsWith("n=") && the_input.length() >= 3)
+  {
+    int new_value = the_input.substring(2).toInt();
+    if(new_value > 0 && new_value < 65535)
+    { 	
+      processNewPortValue("n=", nmea_mux_port, new_value);
+    }
+    else
+    {
+      #ifdef INPT_DEBUG_ON
+      debug_info(F("Bad number"));
+      #endif
+    }
+  }
+  #ifdef INPT_DEBUG_ON
+  else if(the_input.startsWith("n="))
+  {
+    debug_info(F("Short input"));
+  }
+  #endif
+
+  else if(the_input.startsWith("u=") && the_input.length() >= 6)
+  {        
+    processNewStringValue("u=", web_interface_username, the_input.substring(2));
+  }
+  #ifdef INPT_DEBUG_ON
+  else if(the_input.startsWith("u="))
+  {
+    debug_info(F("Short input"));
+  }
+  #endif
+
+  else if(the_input.startsWith("U=") && the_input.length() >= 6)
+  {        
+    processNewStringValue("U=", web_interface_password, the_input.substring(2));
+  }
+  #ifdef INPT_DEBUG_ON
+  else if(the_input.startsWith("U="))
+  {
+    debug_info(F("Short input"));
+  }
+  #endif
+
+  else if(the_input.startsWith("P=") && the_input.length() >= 3)
+  {        
+    int new_value = the_input.substring(2).toInt();
+    if(the_input[2] == '0' || the_input[2] == '1')
+    { 	
+      processNewFlagValue("P=", phone_home_on, new_value);
+    }
+    else
+    {
+      #ifdef INPT_DEBUG_ON
+      debug_info(F("Bad boolean"));
+      #endif
+    }
+  }
+  #ifdef INPT_DEBUG_ON
+  else if(the_input.startsWith("P="))
+  {
+    debug_info(F("Short input"));
+  }
+  #endif
+  
+  else if(the_input.startsWith("Z=") && the_input.length() >= 3)
+  {        
+    int new_value = the_input.substring(2).toInt();
+    if(the_input[2] == '0' || the_input[2] == '1')
+    { 	
+      processNewFlagValue("Z=", virtual_serial_on, new_value);
+      kickVirtualSerial();
+    }
+    else
+    {
+      #ifdef INPT_DEBUG_ON
+      debug_info(F("Bad boolean"));
+      #endif
+    }
+  }
+  #ifdef INPT_DEBUG_ON
+  else if(the_input.startsWith("Z="))
+  {
+    debug_info(F("Short input"));
+  }
+  #endif
+
+  else if(the_input.startsWith("z=") && the_input.length() >= 3)
+  {
+    int new_value = the_input.substring(2).toInt();
+    if(new_value > 0 && new_value < 65535)
+    { 	
+      processNewPortValue("z=", virtual_serial_port, new_value);
+      kickVirtualSerial();
+    }
+    else
+    {
+      #ifdef INPT_DEBUG_ON
+      debug_info(F("Bad number"));
+      #endif
+    }
+  }
+  #ifdef INPT_DEBUG_ON
+  else if(the_input.startsWith("z="))
+  {
+    debug_info(F("Short input"));
+  }
+  #endif
 }
+
 
 void virtualSerialHouseKeeping()
 {
@@ -1856,23 +2506,92 @@ void virtualSerialHouseKeeping()
     virtual_serial_client = virtual_serial_server->available();
   }
 
+  //
+  //  read anything on it's way in
+  //
+
+  char incoming_byte;
+  if(virtual_serial_client)
+  {
+    while(virtual_serial_client.available() && (int) virtual_serial_read_buffer.length() < MAX_CONSOLE_BUFFER)
+    {
+      incoming_byte = virtual_serial_client.read();
+      if(incoming_byte == '\r')
+      {
+        parseInput(virtual_serial_read_buffer);
+        virtual_serial_read_buffer = "";
+      }
+      else if (incoming_byte == '\n')
+      {
+        // don't do anything
+      }
+      else
+      {
+        virtual_serial_read_buffer += incoming_byte;
+      }
+    }
+    if((int) virtual_serial_read_buffer.length() >= MAX_CONSOLE_BUFFER - 1 )
+    {
+      virtual_serial_read_buffer = "";
+    }
+  }
 }
 
 void houseKeeping()
 {
-  debug_out(String(F("WiFi.status()=")) + WiFi.status() + String(F(", IP address: ")) + WiFi.localIP()); 
+  #ifdef STAT_DEBUG_ON
+  IPAddress local = WiFi.localIP();
+  debug_info(String(F("WiFi.status()=")) + WiFi.status() + String(F(", IP address: ")) + local.toString()); 
+  #endif
 
   long now = millis();
   for(int i; i < MAX_COOKIES; i++)
   {
     if(now - cookies[i].time > 60 * 1000 * 8 && cookies[i].valid == true)	// 8 minute cookie timeout
     {
-       //debug_out("Nuked a cookie"
        nukeCookie(i);
     }
   }
+
+  if(WiFi.status() == WL_CONNECTED && WiFi.localIP() > 0)
+  {
+    if(!called_mdns_after_connection)
+    {
+      called_mdns_after_connection = true;
+      kickMDNS();
+    }
+  }
+  else
+  {
+    called_mdns_after_connection = false;
+  }
 }
 
+
+void readConsole()
+{
+  while(Serial.available() && (int) console_read_buffer.length() < MAX_CONSOLE_BUFFER)
+  {
+     int incoming_byte = Serial.read();
+     if(incoming_byte == '\r')
+     {
+       parseInput(console_read_buffer);
+       console_read_buffer = "";
+     }
+     else if (incoming_byte == '\n')
+     {
+       // don't do anything
+     }
+     else
+     {
+       console_read_buffer += String((char) incoming_byte);
+     }
+  }
+  if((int) console_read_buffer.length() >= MAX_CONSOLE_BUFFER - 1 )
+  {
+    console_read_buffer = "";
+  }
+}
 
 
 void loop(void)
@@ -1883,6 +2602,12 @@ void loop(void)
    
   unsigned long current_timestamp = millis();
  
+  if(current_timestamp - console_previous_timestamp > console_read_interval)
+  {
+    console_previous_timestamp = current_timestamp;
+    readConsole();
+  }
+
   if(current_timestamp - house_keeping_previous_timestamp >  house_keeping_interval)
   {
     house_keeping_previous_timestamp = current_timestamp;

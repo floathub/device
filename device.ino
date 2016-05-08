@@ -120,13 +120,7 @@
   it's obviously the second one)
 */
 
-#define  FLOATHUB_PROTOCOL_VERSION 1
-#define  FLOATHUB_ENCRYPT_VERSION  2
-#ifdef WIFI_NOT_CELL
-#define  FLOATHUB_MODEL_DESCRIPTION "FW7-1.1"
-#else
-#define  FLOATHUB_MODEL_DESCRIPTION "FC7-1.1"
-#endif
+#include "./esp8266/version_defines.h"
 
 
 /*
