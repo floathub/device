@@ -58,6 +58,8 @@ extern "C" {
 #define MDNS_DEBUG_ON
 #define STAT_DEBUG_ON
 #define INPT_DEBUG_ON
+#define WIFI_DEBUG_ON
+#define FILE_DEBUG_ON
 
 //
 //  Global defines
@@ -111,6 +113,30 @@ unsigned long boot_counter;
 
 
 //
+//	Othe global stuff
+//
+
+#define MAX_LATEST_MESSAGE_SIZE 512
+String latest_message_to_send = "";
+WiFiClient fdr_client;
+
+#define MAX_WIFI_READ_BUFFER_SIZE 32
+String wifi_read_buffer;
+
+enum communication_state
+{
+    idle,
+    waiting_for_response
+};
+        
+communication_state current_communication_state = idle; 
+
+bool filesystem_is_working;
+bool latest_message_from_file;
+long unsigned int low_file_pointer;
+long unsigned int high_file_pointer;
+
+//
 //	Struct to hold out authentication cookies
 //
 
@@ -134,12 +160,16 @@ unsigned long house_keeping_interval     	   = 3000;  // Do house keeping every 
 unsigned long nmea_housekeeping_interval 	   = 1000;  // Check on nmea connections every second	
 unsigned long virtual_serial_housekeeping_interval = 500;   // Check on virtual serial connections every 1/2 second
 unsigned long console_read_interval		   = 300;   // Check on "console" (mostly stuff from main board) every 3/10's of a second
+unsigned long fdr_communications_interval	   = 200;   // Check ono status of pushing out FDR messages every 1/5 of a second
 
 
 unsigned long house_keeping_previous_timestamp = 0;
 unsigned long nmea_housekeeping_previous_timestamp = 0;
 unsigned long virtual_serial_housekeeping_previous_timestamp = 0;
 unsigned long console_previous_timestamp = 0; 
+unsigned long fdr_communications_previous_timestamp = 0;
+
+
 //
 // Servers of many types and size for such a small little microprocessor :-)
 //
@@ -1806,6 +1836,141 @@ void displayCurrentVariables()
 
 }
 
+
+void showFileList(bool actually_show = true)
+{
+  low_file_pointer = 0; 
+  high_file_pointer = 0;
+  if(!filesystem_is_working)
+  {
+    return;
+  }
+  if(true)
+  {
+    help_info(F("XXXXX BEG FILE LISTING XXXXX")); 
+  }
+  String file_name;
+  int file_name_number = 0;
+  Dir dir = SPIFFS.openDir("/");
+  while(dir.next())
+  {
+    file_name = String(dir.fileName()).substring(1);
+    if(actually_show)
+    {
+      help_info(file_name);
+    }
+    if(file_name != "floathub.txt")
+    {
+      file_name_number = file_name.toInt();
+      if(file_name_number > 0)
+      {
+        if(low_file_pointer  == 0)
+        {
+          low_file_pointer = file_name_number;
+        }
+        else if(file_name_number < low_file_pointer)
+        {
+	  low_file_pointer = file_name_number;
+        }
+        if(file_name_number > high_file_pointer)
+        {
+          high_file_pointer = file_name_number; 
+        }
+      }
+    }
+  }
+  if(actually_show)
+  {
+    help_info(String("LP=") + low_file_pointer + String(", HP=") + high_file_pointer); 
+    help_info(F("XXXXX END FILE LISTING XXXXX")); 
+  }
+}
+
+
+void popMessageQueue()
+{
+
+  if(!filesystem_is_working)
+  {
+    return;
+  }
+
+  if(low_file_pointer > 0)
+  {
+    latest_message_from_file = true;
+    #ifdef FILE_DEBUG_ON
+    debug_info(F("Rebuilding message ..."));
+    #endif
+    File f = SPIFFS.open("/" + String(low_file_pointer), "r");
+    if(!f)
+    {
+      debug_info("Oy Vey!");
+      return;
+    }
+    latest_message_to_send = "";
+    while(f.available())
+    {
+      latest_message_to_send += (char) f.read();
+    }
+    f.close();
+    #ifdef FILE_DEBUG_ON
+    debug_info(F("... done"));
+    #endif
+  }
+
+}
+
+
+
+
+
+
+bool initFileSystem()
+{
+  File checker = SPIFFS.open("/floathub.txt","r");
+  help_info(F("Formatting new filesystem"));
+  if(!SPIFFS.format())
+  {
+    help_info(F("BROKEN FILE SYSTEM A"));
+    filesystem_is_working = false;
+    return false;
+  }
+  checker = SPIFFS.open("/floathub.txt","w");
+  if(!checker)
+  {
+    help_info(F("BROKEN FILE SYSTEM B"));
+    filesystem_is_working = false;
+    return false;
+  }
+  checker.print("424242424242");
+  checker.close();
+  filesystem_is_working = true;
+  return true;
+}
+
+void setupFileSystem()
+{
+  SPIFFS.begin();
+
+  //
+  //  See if we can read our floathub.txt file. If we can't, this is a
+  // virgin filesystem and needs to be formatted
+  //
+
+  File checker = SPIFFS.open("/floathub.txt","r");
+  
+  if(!checker)
+  {
+    initFileSystem();
+    return;
+  }
+
+  checker.close();
+  filesystem_is_working = true;
+
+  showFileList();
+}
+
 void setup(void)
 {
 
@@ -1815,7 +1980,10 @@ void setup(void)
 
   console_read_buffer.reserve(MAX_CONSOLE_BUFFER);
   virtual_serial_read_buffer.reserve(MAX_CONSOLE_BUFFER);
-
+  latest_message_to_send.reserve(MAX_LATEST_MESSAGE_SIZE);
+  wifi_read_buffer.reserve(MAX_WIFI_READ_BUFFER_SIZE);
+  latest_message_to_send = "";
+  wifi_read_buffer = "";
 
   Serial.begin ( 115200 );
 
@@ -1854,6 +2022,11 @@ void setup(void)
   help_info("");
   displayCurrentVariables();
 
+  //
+  //  Setup filesystem (do some checks, format if first time run, etc.)
+  //
+
+  setupFileSystem();
 
   //
   // Fire up the WiFi
@@ -1910,16 +2083,15 @@ void setup(void)
 
   kickVirtualSerial();
 
+  //
+  // If we have some, pop off an old message
+  //
 
-  uint32 flash_id = spi_flash_get_id();
-
-  Serial.print("I See the flash id as ");
-  Serial.println(flash_id);
-
-  Serial.print("And other method sees ");
-  Serial.println(ESP.getFlashChipId());
-
-
+  if(low_file_pointer > 0)
+  {
+    popMessageQueue();
+    latest_message_from_file = true;
+  }
 }
 
 void echoNMEA(String a_message)
@@ -1936,6 +2108,96 @@ void echoNMEA(String a_message)
   }
 }
 
+void nukeOldestFile()
+{
+  if(!SPIFFS.remove("/" + String(low_file_pointer)))
+  {
+    debug_info(F("Can't delete file"), (int) low_file_pointer);
+  }
+  low_file_pointer += 1; 
+}
+
+
+void pushMessageQueue(String a_message)
+{
+  if(filesystem_is_working)
+  {
+    //
+    // First check how much space we have left
+    //
+
+    #ifdef FILE_DEBUG_ON
+    debug_info(F("Free file space ..."));
+    #endif
+    FSInfo fs_info;
+    SPIFFS.info(fs_info);
+
+    long int space_left = fs_info.totalBytes - fs_info.usedBytes;
+
+    if(space_left > 1024)
+    {
+      #ifdef FILE_DEBUG_ON
+      debug_info(F("Enough free: "), (int) space_left);
+      #endif
+      
+    }
+    else
+    {
+      #ifdef FILE_DEBUG_ON
+      debug_info(F("Not enough free: "), (int) space_left);
+      #endif
+      while(space_left <= 1024)
+      {
+        nukeOldestFile();
+        SPIFFS.info(fs_info);
+        space_left = fs_info.totalBytes - fs_info.usedBytes;
+      } 
+    }
+
+    high_file_pointer += 1;
+    if(low_file_pointer == 0)
+    {
+      low_file_pointer += 1;
+    }
+    
+    //
+    // Create a file called high_file_pointer and write the message inside it
+    //
+
+    File f = SPIFFS.open("/" + String(high_file_pointer), "w");
+    if(!f)
+    {
+      debug_info("very bad, can't creat file");
+    } 
+    else
+    {
+      f.print(a_message);
+      f.close();
+    }
+  }
+  else
+  {
+    //
+    //  This is bad, we have nowhere to store previous message that we still
+    // have not sent. Best we can is to throw it away and replace with previous messaahe,
+    //
+
+    latest_message_to_send = a_message; 
+  }
+}
+
+void queueMessage(String a_message)
+{
+  if(latest_message_to_send.length() == 0)
+  {
+    latest_message_to_send = a_message;
+    latest_message_from_file = false;
+  }
+  else 
+  {
+    pushMessageQueue(a_message);
+  }
+}
 
 void nmeaHouseKeeping()
 {
@@ -1956,8 +2218,6 @@ void nmeaHouseKeeping()
     if(nmea_client[i] && !nmea_client[i].connected())
     {
       nmea_client[i].stop(); 
-      Serial.print("Nuked nmea client at position ");
-      Serial.println(i);
     }
   }
   //
@@ -1979,8 +2239,6 @@ void nmeaHouseKeeping()
     }
     nmea_client[i].stop();
     nmea_client[i] = nmea_server->available();
-    Serial.print("Added nmea client at position ");
-    Serial.println(i);
   }
 
   //
@@ -2033,12 +2291,20 @@ void parseInput(String &the_input)
   {
     displayCurrentVariables();
   }
+  else if(the_input.charAt(0) == 'f')
+  {
+    showFileList();  
+  } 
+
   if(the_input.startsWith("factory"))
   {
     help_info("Doing factory reset ...");
     //init_eeprom_memory();
     //read_eeprom_memory();
+    help_info("FIX THIS HACK");
+    initFileSystem();
   }
+
   else if(the_input.startsWith("E=") && the_input.length() >= 5) // Minimum NMEA sentence length (?)
   {
     echoNMEA(the_input.substring(2));
@@ -2047,6 +2313,17 @@ void parseInput(String &the_input)
   else if(the_input.startsWith("E="))
   {
     debug_info(F("Bad NMEA"));
+  }
+  #endif
+  
+  else if(the_input.startsWith("S=") && the_input.length() >= 5) // Minimum FHUB sentence length (?)
+  {
+    queueMessage(the_input.substring(2));
+  }
+  #ifdef INPT_DEBUG_ON
+  else if(the_input.startsWith("S="))
+  {
+    debug_info(F("Bad FHx"));
   }
   #endif
   
@@ -2537,11 +2814,67 @@ void virtualSerialHouseKeeping()
   }
 }
 
+bool openFdr()
+{
+  // Open a connection to the floathub server (usually fdr.floathub.net)
+
+
+  #ifdef WIFI_DEBUG_ON
+  debug_info(F("Opening fdr socket"));
+  #endif
+  if(fdr_client.connect(float_hub_server.c_str(), float_hub_server_port))
+  {
+    fdr_client.setNoDelay(true);
+    #ifdef WIFI_DEBUG_ON
+    debug_info(F("Success "));
+    #endif
+    return true;
+  }
+  else
+  {
+    #ifdef WIFI_DEBUG_ON
+    debug_info(F("Failure "));
+    #endif
+  }
+
+  return false;
+}
+
+
+bool push_latest_message_out_socket()
+{
+
+  if(fdr_client.connected())
+  {
+    if(fdr_client.write(latest_message_to_send.c_str(), latest_message_to_send.length()) == latest_message_to_send.length())
+    {
+      if(fdr_client.write("\r\n", 2) == 2)
+      {
+        return true;
+      }
+
+    }
+    #ifdef WIFI_DEBUG_ON
+    debug_info("Socket write failed");
+    #endif
+    return false;
+  }
+  #ifdef WIFI_DEBUG_ON
+  else
+  {
+    debug_info(F("socket write called, but not connected"));
+  }
+  #endif
+
+  return false;
+}
+
+
 void houseKeeping()
 {
   #ifdef STAT_DEBUG_ON
   IPAddress local = WiFi.localIP();
-  debug_info(String(F("WiFi.status()=")) + WiFi.status() + String(F(", IP address: ")) + local.toString()); 
+  debug_info(String(F("WiFi.status()=")) + WiFi.status() + String(F(", IP address: ")) + local.toString() + String(F(", latest_message=")) + latest_message_to_send) ; 
   #endif
 
   long now = millis();
@@ -2552,6 +2885,10 @@ void houseKeeping()
        nukeCookie(i);
     }
   }
+}
+
+void fdrHouseKeeping()
+{
 
   if(WiFi.status() == WL_CONNECTED && WiFi.localIP() > 0)
   {
@@ -2559,6 +2896,115 @@ void houseKeeping()
     {
       called_mdns_after_connection = true;
       kickMDNS();
+    }
+
+    //
+    //	We are appear to be connected to something. If there's a message to send, we should do so
+    //	
+
+    unsigned long current_timestamp = millis();
+    if(current_communication_state == idle)
+    {
+      if(latest_message_to_send.length() > 0)
+      {
+        if(openFdr())
+        {
+          if(push_latest_message_out_socket())
+          {
+            #ifdef WIFI_DEBUG_ON
+            debug_info(F("wifi Sent FHx"));
+            #endif
+            //gprs_or_wifi_watchdog_timestamp = current_timestamp;
+            current_communication_state = waiting_for_response;
+            wifi_read_buffer = "";
+          }
+          #ifdef WIFI_DEBUG_ON
+          else
+          {
+            debug_info(F("wifi sock prob"));
+            fdr_client.stop();
+          }
+          #endif
+        }
+        else
+        {
+          fdr_client.stop();
+        }
+      }
+    }
+    else if(current_communication_state == waiting_for_response)
+    {
+      unsigned long last_read = millis();
+      while (fdr_client.connected() && (millis() - last_read < 5000))
+      {
+        while (fdr_client.available() && wifi_read_buffer.length() < MAX_WIFI_READ_BUFFER_SIZE)
+        {
+          wifi_read_buffer += (char) fdr_client.read();
+          last_read = millis();
+        }
+      }
+      if(wifi_read_buffer.indexOf("$FHR$ OK") > -1)
+      {
+        //
+        // Yay! We have succesfully sent something
+        //
+	// Adjust message pointers if need be
+        //
+        
+        if(latest_message_from_file)
+        {
+          if(low_file_pointer > 0)
+          {
+            nukeOldestFile();
+            if(low_file_pointer > high_file_pointer)
+            {
+	      // We have emptied the queue ..
+              low_file_pointer = 0;
+              high_file_pointer = 0;
+	    }
+          }
+	}
+
+
+        //gprs_or_wifi_watchdog_counter = 0;
+        //current_timestamp = millis();
+        //gprs_or_wifi_watchdog_timestamp = current_timestamp;
+
+        latest_message_to_send = "";
+        popMessageQueue();
+
+        if(latest_message_to_send.length() > 0)
+        {
+          if(push_latest_message_out_socket())
+          {
+            #ifdef WIFI_DEBUG_ON
+            debug_info(F("wifi more FHx"));
+            #endif
+            //current_timestamp = millis();
+            //gprs_or_wifi_watchdog_timestamp = current_timestamp;
+            current_communication_state = waiting_for_response;
+            wifi_read_buffer = "";
+          }
+          else
+          {
+            #ifdef WIFI_DEBUG_ON
+            debug_info(F("wifi Hangup"));
+            #endif
+            fdr_client.stop();
+            current_communication_state = idle;
+          }
+
+        }
+        else
+        {
+          #ifdef WIFI_DEBUG_ON
+          debug_info(F("WiFi queue done"));
+          #endif
+          wifi_read_buffer = "";
+          fdr_client.stop();
+          current_communication_state = idle;
+	}
+      }
     }
   }
   else
@@ -2602,6 +3048,13 @@ void loop(void)
    
   unsigned long current_timestamp = millis();
  
+
+  if(current_timestamp - fdr_communications_previous_timestamp >  fdr_communications_interval)
+  {
+    fdr_communications_previous_timestamp = current_timestamp;
+    fdrHouseKeeping();
+
+  }
   if(current_timestamp - console_previous_timestamp > console_read_interval)
   {
     console_previous_timestamp = current_timestamp;
