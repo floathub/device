@@ -57,10 +57,9 @@ extern "C" {
 #define HTTP_DEBUG_ON
 //#define MDNS_DEBUG_ON
 //#define STAT_DEBUG_ON
-//#define INPT_DEBUG_ON
+#define INPT_DEBUG_ON
 //#define WIFI_DEBUG_ON
 //#define FILE_DEBUG_ON
-#define PARS_DEBUG_ON
 
 //
 //  Global defines
@@ -161,7 +160,7 @@ unsigned long house_keeping_interval     	   = 3000;  // Do house keeping every 
 unsigned long nmea_housekeeping_interval 	   = 1000;  // Check on nmea connections every second	
 unsigned long virtual_serial_housekeeping_interval = 500;   // Check on virtual serial connections every 1/2 second
 unsigned long console_read_interval		   = 50;    // Check on "console" (mostly stuff from main board) every 1/20th of a second
-unsigned long fdr_communications_interval	   = 200;   // Check on status of pushing out FDR messages every 1/5 of a second
+unsigned long fdr_communications_interval	   = 100;   // Check on status of pushing out FDR messages every 1/10 of a second
 unsigned long heartbeat_interval		   = 1000;  // Once a second, send heartbeat update 
 int           heartbeat_cycle			   = 0;     // Which heartbeat value to send
 
@@ -2307,25 +2306,8 @@ void processNewIPAddress(String preamble, IPAddress &the_address, IPAddress new_
 void parseInput(String &the_input)
 {
   int i;
-  if(the_input.charAt(0) == 'v')
-  {
-    displayCurrentVariables();
-  }
-  else if(the_input.charAt(0) == 'f')
-  {
-    showFileList();  
-  } 
 
-  if(the_input.startsWith("factory"))
-  {
-    help_info("Doing factory reset ...");
-    //init_eeprom_memory();
-    //read_eeprom_memory();
-    help_info("FIX THIS HACK");
-    initFileSystem();
-  }
-
-  else if(the_input.startsWith("E=") && the_input.length() >= 5) // Minimum NMEA sentence length (?)
+  if(the_input.startsWith("E=") && the_input.length() >= 5) // Minimum NMEA sentence length (?)
   {
     echoNMEA(the_input.substring(2));
   }
@@ -2346,7 +2328,25 @@ void parseInput(String &the_input)
     debug_info(F("Bad FHx"));
   }
   #endif
-  
+
+  else if(the_input.charAt(0) == 'v')
+  {
+    displayCurrentVariables();
+  }
+  else if(the_input.charAt(0) == 'f')
+  {
+    showFileList();  
+  } 
+
+  else if(the_input.startsWith("factory"))
+  {
+    help_info("Doing factory reset ...");
+    //init_eeprom_memory();
+    //read_eeprom_memory();
+    help_info("FIX THIS HACK");
+    initFileSystem();
+  }
+
   else if(the_input.startsWith("i=") && the_input.length() >= 10)
   {        
     bool bad_chars = false;
@@ -2774,6 +2774,13 @@ void parseInput(String &the_input)
     debug_info(F("Short input"));
   }
   #endif
+
+  #ifdef INPT_DEBUG_ON
+  else
+  {
+    debug_info(String(F("Bad input: ")) + the_input);
+  }
+  #endif
 }
 
 
@@ -2840,10 +2847,11 @@ bool openFdr()
 
 
   #ifdef WIFI_DEBUG_ON
-  debug_info(F("Opening fdr socket"));
+  debug_info(F("Opening fdr socket ..."));
   #endif
   if(fdr_client.connect(float_hub_server.c_str(), float_hub_server_port))
   {
+    
     fdr_client.setNoDelay(true);
     #ifdef WIFI_DEBUG_ON
     debug_info(F("Success "));
@@ -2990,7 +2998,7 @@ void fdrHouseKeeping()
     else if(current_communication_state == waiting_for_response)
     {
       unsigned long last_read = millis();
-      while (fdr_client.connected() && (millis() - last_read < 5000))
+      while (fdr_client.connected() && (millis() - last_read < 50))
       {
         while (fdr_client.available() && wifi_read_buffer.length() < MAX_WIFI_READ_BUFFER_SIZE)
         {
@@ -3083,7 +3091,7 @@ void readConsole()
   }
   if((int) console_read_buffer.length() >= MAX_CONSOLE_BUFFER - 1 )
   {
-    #ifdef PARS_DEBUG_ON
+    #ifdef INPT_DEBUG_ON
     debug_info("==== beg console nuke ====");
     debug_info(console_read_buffer);
     debug_info("==== end console nuke ====");

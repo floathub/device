@@ -1350,7 +1350,10 @@ void individual_pump_read(int pump_number, pump_state &state, int analog_input)
        new_message += pump_number;
        new_message += ":1";
        
-       //queue_pump_message(pump_number,1);
+       latest_message_to_send = new_message;
+       encode_latest_message_to_send();
+       send_encoded_message_to_esp8266();
+       
        echo_info(new_message);
        state = on;       
      }
@@ -1379,7 +1382,11 @@ void individual_pump_read(int pump_number, pump_state &state, int analog_input)
        new_message += ",P";
        new_message += pump_number;
        new_message += ":0";
-       //queue_pump_message(pump_number,0);
+
+       latest_message_to_send = new_message;
+       encode_latest_message_to_send();
+       send_encoded_message_to_esp8266();
+
        echo_info(new_message);
        state = off;
      }
@@ -1483,7 +1490,9 @@ void report_state(bool console_only)
 
   if(!console_only)
   {
-    //queue_detailed_message();
+    latest_message_to_send = new_message;
+    encode_latest_message_to_send();
+    send_encoded_message_to_esp8266();
   }
   echo_info(new_message);
 }
@@ -1840,9 +1849,20 @@ void update_nmea()
   }
 }
 
+void send_encoded_message_to_esp8266()
+{
+  Serial1.print("S=");
+  Serial1.println(latest_message_to_send);
+
+  Serial.print("Just sent: S=");
+  Serial.println(latest_message_to_send);
+
+}
+
+
 void encode_latest_message_to_send()
 {
-
+  return;
   #ifdef BYPASS_AES_ON
     return;
   #endif
