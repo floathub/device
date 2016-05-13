@@ -55,11 +55,12 @@ extern "C" {
 //
 
 #define HTTP_DEBUG_ON
-#define MDNS_DEBUG_ON
-#define STAT_DEBUG_ON
-#define INPT_DEBUG_ON
-#define WIFI_DEBUG_ON
-#define FILE_DEBUG_ON
+//#define MDNS_DEBUG_ON
+//#define STAT_DEBUG_ON
+//#define INPT_DEBUG_ON
+//#define WIFI_DEBUG_ON
+//#define FILE_DEBUG_ON
+#define PARS_DEBUG_ON
 
 //
 //  Global defines
@@ -159,15 +160,17 @@ COOKIES cookies[MAX_COOKIES];
 unsigned long house_keeping_interval     	   = 3000;  // Do house keeping every 3 seconds
 unsigned long nmea_housekeeping_interval 	   = 1000;  // Check on nmea connections every second	
 unsigned long virtual_serial_housekeeping_interval = 500;   // Check on virtual serial connections every 1/2 second
-unsigned long console_read_interval		   = 300;   // Check on "console" (mostly stuff from main board) every 3/10's of a second
-unsigned long fdr_communications_interval	   = 200;   // Check ono status of pushing out FDR messages every 1/5 of a second
-
+unsigned long console_read_interval		   = 50;    // Check on "console" (mostly stuff from main board) every 1/20th of a second
+unsigned long fdr_communications_interval	   = 200;   // Check on status of pushing out FDR messages every 1/5 of a second
+unsigned long heartbeat_interval		   = 1000;  // Once a second, send heartbeat update 
+int           heartbeat_cycle			   = 0;     // Which heartbeat value to send
 
 unsigned long house_keeping_previous_timestamp = 0;
 unsigned long nmea_housekeeping_previous_timestamp = 0;
 unsigned long virtual_serial_housekeeping_previous_timestamp = 0;
 unsigned long console_previous_timestamp = 0; 
 unsigned long fdr_communications_previous_timestamp = 0;
+unsigned long heartbeat_previous_timestamp = 0;
 
 
 //
@@ -186,7 +189,8 @@ WiFiClient	  virtual_serial_client;
 //	Some buffers for reading the above
 //
 
-#define MAX_CONSOLE_BUFFER 100
+
+#define MAX_CONSOLE_BUFFER 255
 
 String  console_read_buffer;
 String	virtual_serial_read_buffer;
@@ -209,6 +213,21 @@ void help_info(String some_info)
     virtual_serial_client.print(F("$    "));
     virtual_serial_client.println(some_info);
   }
+}
+
+void internal_info(String some_info)
+{
+
+  //
+  // Send only on internal console and preface with FHI 
+  //
+
+  Serial.print(F("$FHI:"));
+  Serial.print(float_hub_id);
+  Serial.print(F(":"));
+  Serial.print(FLOATHUB_PROTOCOL_VERSION);
+  Serial.print(F("$    "));
+  Serial.println(some_info);
 }
 
 
@@ -2148,6 +2167,7 @@ void pushMessageQueue(String a_message)
       #endif
       while(space_left <= 1024)
       {
+        popMessageQueue();
         nukeOldestFile();
         SPIFFS.info(fs_info);
         space_left = fs_info.totalBytes - fs_info.usedBytes;
@@ -2245,7 +2265,7 @@ void nmeaHouseKeeping()
   //  Temp testing
   //
 
-  echoNMEA("McLovin");
+  //echoNMEA("McLovin");
 }
 
 
@@ -2872,6 +2892,7 @@ bool push_latest_message_out_socket()
 
 void houseKeeping()
 {
+
   #ifdef STAT_DEBUG_ON
   IPAddress local = WiFi.localIP();
   debug_info(String(F("WiFi.status()=")) + WiFi.status() + String(F(", IP address: ")) + local.toString() + String(F(", latest_message=")) + latest_message_to_send) ; 
@@ -2884,6 +2905,41 @@ void houseKeeping()
     {
        nukeCookie(i);
     }
+  }
+}
+
+void heartbeatHouseKeeping()
+{
+  if(heartbeat_cycle == 0)
+  {
+    internal_info(String(F("i=")) + float_hub_id); 
+  }
+  else if(heartbeat_cycle == 1)
+  {
+    String new_message = "k=";
+    for(int i = 0; i < 16; i++)
+    {
+      if(float_hub_aes_key[i] < 16)
+      {
+        new_message += "0";
+      }
+      new_message += String(float_hub_aes_key[i], HEX);
+    }
+    internal_info(new_message);
+  }
+  else if(heartbeat_cycle == 2)
+  {
+    int public_wifi_status = 0;
+    if(WiFi.status() == WL_CONNECTED)
+    {
+      public_wifi_status = 1;
+    }
+    internal_info(String(F("c=")) + public_wifi_status);
+  }
+  heartbeat_cycle++;
+  if(heartbeat_cycle >=3)
+  {
+    heartbeat_cycle = 0;
   }
 }
 
@@ -2914,7 +2970,6 @@ void fdrHouseKeeping()
             #ifdef WIFI_DEBUG_ON
             debug_info(F("wifi Sent FHx"));
             #endif
-            //gprs_or_wifi_watchdog_timestamp = current_timestamp;
             current_communication_state = waiting_for_response;
             wifi_read_buffer = "";
           }
@@ -2965,11 +3020,6 @@ void fdrHouseKeeping()
           }
 	}
 
-
-        //gprs_or_wifi_watchdog_counter = 0;
-        //current_timestamp = millis();
-        //gprs_or_wifi_watchdog_timestamp = current_timestamp;
-
         latest_message_to_send = "";
         popMessageQueue();
 
@@ -2980,8 +3030,6 @@ void fdrHouseKeeping()
             #ifdef WIFI_DEBUG_ON
             debug_info(F("wifi more FHx"));
             #endif
-            //current_timestamp = millis();
-            //gprs_or_wifi_watchdog_timestamp = current_timestamp;
             current_communication_state = waiting_for_response;
             wifi_read_buffer = "";
           }
@@ -3035,6 +3083,11 @@ void readConsole()
   }
   if((int) console_read_buffer.length() >= MAX_CONSOLE_BUFFER - 1 )
   {
+    #ifdef PARS_DEBUG_ON
+    debug_info("==== beg console nuke ====");
+    debug_info(console_read_buffer);
+    debug_info("==== end console nuke ====");
+    #endif
     console_read_buffer = "";
   }
 }
@@ -3049,6 +3102,11 @@ void loop(void)
   unsigned long current_timestamp = millis();
  
 
+  if(current_timestamp - heartbeat_previous_timestamp >  heartbeat_interval)
+  {
+    heartbeat_previous_timestamp = current_timestamp;
+    heartbeatHouseKeeping();
+  }
   if(current_timestamp - fdr_communications_previous_timestamp >  fdr_communications_interval)
   {
     fdr_communications_previous_timestamp = current_timestamp;
