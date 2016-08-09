@@ -17,7 +17,6 @@
    http://www.esp8266.com/viewtopic.php?f=29&t=2520
    https://github.com/chriscook8/esp-arduino-apboot
    https://github.com/esp8266/Arduino/tree/esp8266/hardware/esp8266com/esp8266/libraries/DNSServer/examples/CaptivePortalAdvanced
-   Built by AlexT https://github.com/tzapu
 
 */
 
@@ -54,12 +53,13 @@ extern "C" {
 //	Debugging options
 //
 
-#define HTTP_DEBUG_ON
+//#define HTTP_DEBUG_ON
 //#define MDNS_DEBUG_ON
 //#define STAT_DEBUG_ON
 #define INPT_DEBUG_ON
-//#define WIFI_DEBUG_ON
-//#define FILE_DEBUG_ON
+#define WIFI_DEBUG_ON
+#define FILE_DEBUG_ON
+#define FILE_SERVE_ON	// Useful when debuggig to see SPIFF files from a browser
 
 //
 //  Global defines
@@ -90,12 +90,13 @@ IPAddress public_static_dns;
 
 //	Account Related 
 
-String        float_hub_id;			// default: outofbox
+String        float_hub_id;			// default: factory0
 byte          float_hub_aes_key[16]; 
 
 //	Other Settings
 
 bool	nmea_mux_on;				// default: yes
+bool    nmea_mux_private;			// default: no
 unsigned int  nmea_mux_port;			// default: 2319
 String	web_interface_username;			// default: floathub
 String	web_interface_password;			// default: floathub
@@ -135,6 +136,8 @@ bool filesystem_is_working;
 bool latest_message_from_file;
 long unsigned int low_file_pointer;
 long unsigned int high_file_pointer;
+#define MIN_SPIFF_SPACE	4096
+int  serial_ready_pin = 5;
 
 //
 //	Struct to hold out authentication cookies
@@ -159,9 +162,10 @@ COOKIES cookies[MAX_COOKIES];
 unsigned long house_keeping_interval     	   = 3000;  // Do house keeping every 3 seconds
 unsigned long nmea_housekeeping_interval 	   = 1000;  // Check on nmea connections every second	
 unsigned long virtual_serial_housekeeping_interval = 500;   // Check on virtual serial connections every 1/2 second
-unsigned long console_read_interval		   = 50;    // Check on "console" (mostly stuff from main board) every 1/20th of a second
+unsigned long console_read_interval		   = 10;    // Check on "console" (mostly stuff from main board) every 1/100th of a second
 unsigned long fdr_communications_interval	   = 100;   // Check on status of pushing out FDR messages every 1/10 of a second
 unsigned long heartbeat_interval		   = 1000;  // Once a second, send heartbeat update 
+unsigned long network_interval			   = 200;   // Every 1/5th of a second, look at web requests/etc
 int           heartbeat_cycle			   = 0;     // Which heartbeat value to send
 
 unsigned long house_keeping_previous_timestamp = 0;
@@ -170,6 +174,7 @@ unsigned long virtual_serial_housekeeping_previous_timestamp = 0;
 unsigned long console_previous_timestamp = 0; 
 unsigned long fdr_communications_previous_timestamp = 0;
 unsigned long heartbeat_previous_timestamp = 0;
+unsigned long network_previous_timestamp = 0; 
 
 
 //
@@ -183,17 +188,28 @@ WiFiServer       *nmea_server = 0;
 WiFiClient        nmea_client[4];
 WiFiServer	 *virtual_serial_server = 0;
 WiFiClient	  virtual_serial_client;
+unsigned long     expected_fdr_response_time;
+#define		  FDR_RESPONSE_MAX	15000UL  // If we don't hear back within 15 seconds, assume message did not get through
+
 
 //
 //	Some buffers for reading the above
 //
 
 
-#define MAX_CONSOLE_BUFFER 255
+#define MAX_CONSOLE_BUFFER 1024
 
 String  console_read_buffer;
 String	virtual_serial_read_buffer;
- 
+
+//
+//	Watchdog stuff
+//
+
+unsigned watchdog_timestamp;
+#define  WATCHDOG_TIME_LIMIT 3600000UL	// If we do not manage to get and data through to FDR after 1 hour, reboot the whole shebang 
+
+
 void help_info(String some_info)
 {
   Serial.print(F("$FHH:"));
@@ -351,14 +367,14 @@ void init_eeprom_memory()
   //  Set default id
   //
   
-  EEPROM.write(10, 'o');
-  EEPROM.write(11, 'u');
-  EEPROM.write(12, 't');
-  EEPROM.write(13, 'o');
-  EEPROM.write(14, 'f');
-  EEPROM.write(15, 'b');
-  EEPROM.write(16, 'o');
-  EEPROM.write(17, 'x');
+  EEPROM.write(10, 'f');
+  EEPROM.write(11, 'a');
+  EEPROM.write(12, 'c');
+  EEPROM.write(13, 't');
+  EEPROM.write(14, 'o');
+  EEPROM.write(15, 'r');
+  EEPROM.write(16, 'y');
+  EEPROM.write(17, 'X');
   
   //
   //  Set default server
@@ -379,10 +395,10 @@ void init_eeprom_memory()
   //  Default public WiFi SSID & Password
   //
 
-  writeStringToEEPROM(53, F("floathub"));
+  writeStringToEEPROM(53, F("factoryX"));
   EEPROM.write(85, '\0');
   
-  writeStringToEEPROM(86, F("floathub"));
+  writeStringToEEPROM(86, F("factoryX"));
   EEPROM.write(118, '\0');
   
   
@@ -463,12 +479,13 @@ void init_eeprom_memory()
 
 
   //
-  // NMEA muxer flag and port of 2319
+  // NMEA muxer flag, port of 2319, private
   //
 
-  EEPROM.write(251, 0);
+  EEPROM.write(251, 1);
   EEPROM.write(252, 9);
   EEPROM.write(253, 15);
+  EEPROM.write(324, 0);
  
   //
   // Web interface username and password
@@ -587,6 +604,7 @@ void write_eeprom_memory()
   EEPROM.write(251, nmea_mux_on);
   EEPROM.write(252, highByte(nmea_mux_port));
   EEPROM.write(253, lowByte(nmea_mux_port));
+  EEPROM.write(324, nmea_mux_private);
  
   //
   // Web interface username and password
@@ -714,6 +732,7 @@ void read_eeprom_memory()
   nmea_mux_on = EEPROM.read(251);
   nmea_mux_port  = EEPROM.read(253);
   nmea_mux_port += EEPROM.read(252) * 256;
+  nmea_mux_private = EEPROM.read(324);
   
   //
   //  Phone home?
@@ -810,7 +829,14 @@ void nukeNmeaServer()
 void fireUpNmeaServer()
 {
   nukeNmeaServer();
-  nmea_server = new WiFiServer(nmea_mux_port);
+  if(nmea_mux_private)
+  {
+    nmea_server = new WiFiServer(WiFi.softAPIP(), nmea_mux_port);
+  }
+  else
+  {
+    nmea_server = new WiFiServer(nmea_mux_port);
+  }
   nmea_server->begin();
   nmea_server->setNoDelay(true);
 
@@ -876,7 +902,7 @@ void spitOutIPInput(String &page, String name_stub, String label, const IPAddres
   page += " . <input type='number' name='" + name_stub + "2' length='3' maxlength='3'  style='width: 60px' value='" + String(address[1]) + "' >";
   page += " . <input type='number' name='" + name_stub + "3' length='3' maxlength='3'  style='width: 60px' value='" + String(address[2]) + "' >";
   page += " . <input type='number' name='" + name_stub + "4' length='3' maxlength='3'  style='width: 60px' value='" + String(address[3]) + "' >";
-  page += "<br/>";
+  page += "<br>";
 }
 
 void checkPort(unsigned int &the_port)
@@ -896,7 +922,7 @@ void sendPleaseWait(String where_to_go)
 {
 
   String page = FPSTR(HTTP_INITA);
-  page += "<meta http-equiv='refresh' content='8; " + where_to_go + "'/>";
+  page += "<meta http-equiv='refresh' content='8; " + where_to_go + "'>";
   page += FPSTR(HTTP_TITLE);
   page += FPSTR(HTTP_STYLE);
   page += FPSTR(HTTP_DIV_A);
@@ -991,8 +1017,8 @@ void handleLogin()
   page += FPSTR(HTTP_DIV_B);
   page += "<h2>Device Login</h2>";
   page += "<form method='post' action='/login'>";
-  page += "<input name='USER' length='32' placeholder='username'/><br/>";
-  page += "<input name='PASS' length='64' type='password' placeholder='password'/><br/><br/>";
+  page += "<input name='USER' length='32' placeholder='username' autofocus><br>";
+  page += "<input name='PASS' length='64' type='password' placeholder='password'><br><br>";
   page += "<button type='submit'>Login</button></form></div>";
 
   page += FPSTR(HTTP_CLOSE);
@@ -1146,13 +1172,13 @@ void handlePrivateWireless()
 
   page += "<form method='post' action='/private'>";
   page += "<label for='privssid'>Network Name: </label>";
-  page += "<input name='privssid' value='" + private_wifi_ssid + "'/><br/>";
+  page += "<input name='privssid' value='" + private_wifi_ssid + "' autofocus><br>";
   page += "<label for='privpassone'>Password: </label>";
-  page += "<input name='privpassone' type='password'/><br/>";
+  page += "<input name='privpassone' type='password'><br>";
   page += "<label for='privpasstwo'>Repeat: </label>";
-  page += "<input name='privpasstwo' type='password' /><br/>";
+  page += "<input name='privpasstwo' type='password'><br>";
   page += "<button type='submit' name='savebutton' value='True'>Save</button>";
-  page += "</form></div><br/>";
+  page += "</form></div><br>";
 
   page += FPSTR(HTTP_HOMEB);
   page += FPSTR(HTTP_CLOSE);
@@ -1187,28 +1213,41 @@ void kickMDNS()
 
 void kickWiFi()
 {
+  #ifdef WIFI_DEBUG_ON
+  debug_info(F("Kicking the WiFi"));
+  #endif
   WiFi.disconnect();
   WiFi.mode(WIFI_OFF);
 
-
-  WiFi.mode(WIFI_AP_STA);
-  WiFi.begin(public_wifi_ssid.c_str(), public_wifi_password.c_str());
-  WiFi.softAP(private_wifi_ssid.c_str(), private_wifi_password.c_str());
-  byte attempts = 0; 
-  while (WiFi.status() != WL_CONNECTED && attempts < 24)
+  if(public_wifi_ssid == "factoryX")
   {
-    delay(250);
-    attempts++;
-  }
-
-  wifi_station_dhcpc_stop();
-  if(public_ip_is_static)
-  {
-    WiFi.config(public_static_ip, public_static_gate, public_static_mask, public_static_dns);
+    WiFi.setAutoConnect(false);
+    WiFi.mode(WIFI_AP);
+    WiFi.softAP(private_wifi_ssid.c_str(), private_wifi_password.c_str());
   }
   else
   {
-    wifi_station_dhcpc_start();
+
+    WiFi.setAutoConnect(true);
+    WiFi.mode(WIFI_AP_STA);
+    WiFi.begin(public_wifi_ssid.c_str(), public_wifi_password.c_str());
+    WiFi.softAP(private_wifi_ssid.c_str(), private_wifi_password.c_str());
+    byte attempts = 0; 
+    while (WiFi.status() != WL_CONNECTED && attempts < 24)
+    { 
+      delay(250);
+      attempts++;
+    }
+
+    wifi_station_dhcpc_stop();
+    if(public_ip_is_static)
+    {
+      WiFi.config(public_static_ip, public_static_gate, public_static_mask, public_static_dns);
+    }
+    else
+    {
+      wifi_station_dhcpc_start();
+    }
   }
 
   called_mdns_after_connection = false;
@@ -1310,22 +1349,25 @@ void handlePublicWireless()
   String wifi_names[12];
   byte num_names = 0; 
 
-  byte numSsid = WiFi.scanNetworks();
-  for (int i = 0; i < numSsid; i++)
+  if(WiFi.localIP() > 0)
   {
-    bool match = false;
-    for(int j = 0; j < num_names; j++)
+    byte numSsid = WiFi.scanNetworks();
+    for (int i = 0; i < numSsid; i++)
     {
-      if (wifi_names[j] == String(WiFi.SSID(i)))
+      bool match = false;
+      for(int j = 0; j < num_names; j++)
       {
-        match = true;
-        break;
+        if (wifi_names[j] == String(WiFi.SSID(i)))
+        {
+          match = true;
+          break;
+        }
       }
-    }
-    if(!match && num_names < 12)
-    {
-      wifi_names[num_names] = String(WiFi.SSID(i));
-      num_names++;
+      if(!match && num_names < 12)
+      {
+        wifi_names[num_names] = String(WiFi.SSID(i));
+        num_names++;
+      }
     }
   }
 
@@ -1348,7 +1390,7 @@ void handlePublicWireless()
 
   page += "<form method='post' action='/public'>";
   page += "<label for='pubssid'>Network Name: </label>";
-  page += "<input name='pubssid' value='" + public_wifi_ssid + "' list='available'/><br/>";
+  page += "<input name='pubssid' value='" + public_wifi_ssid + "' list='available'><br>";
 
   //
   //  On an html 5 browser there will also be drop down for other values
@@ -1362,23 +1404,23 @@ void handlePublicWireless()
   page += "</datalist>";
 
   page += "<label for='pubpassone'>Password: </label>";
-  page += "<input name='pubpassone' type='password'/><br/>";
+  page += "<input name='pubpassone' type='password' autofocus><br>";
   page += "<label for='pubpasstwo'>Repeat: </label>";
-  page += "<input name='pubpasstwo' type='password' /><br/>";
+  page += "<input name='pubpasstwo' type='password'><br>";
   page += "<input type='radio' name='pubadd' value='dynamic' id='dynamic' ";
   if(!public_ip_is_static)
   {
     page += "checked ";
   }
   page += "style='width: 20px; vertical-align: middle;'>";
-  page += "<label for='dynamic' style='width: 240px; text-align: left;'>Dynamic Addressing (DHCP)</label><br/>";
+  page += "<label for='dynamic' style='width: 240px; text-align: left;'>Dynamic Addressing (DHCP)</label><br>";
   page += "<input type='radio' name='pubadd' value='static' id='static' ";
   if(public_ip_is_static)
   {
     page += "checked ";
   }
   page += "style='width: 20px; vertical-align: middle;'>";
-  page += "<label for='static' style='width: 240px; text-align: left;'>Static Addressing</label><br/><br/>";
+  page += "<label for='static' style='width: 240px; text-align: left;'>Static Addressing</label><br><br>";
 
   //
   //	If it's not DHCP, we need local IP, gateway, mask, and dns 
@@ -1396,7 +1438,7 @@ void handlePublicWireless()
   page += "</div>";
 
   page += "<button type='submit' name='savebutton' value='True'>Save</button>";
-  page += "</form></div><br/>";
+  page += "</form></div><br>";
 
   page += FPSTR(HTTP_HOMEB);
   page += FPSTR(HTTP_CLOSE);
@@ -1462,6 +1504,19 @@ void handleOther()
       nmea_changed = true; 
     }
 
+    if(web_server.arg("muxprivate") == "yes" && !nmea_mux_private)
+    {
+      nmea_mux_private = true;
+      something_changed = true;
+      nmea_changed = true;
+    }
+    else if(nmea_mux_private && web_server.arg("muxprivate") != "yes")
+    {
+      nmea_mux_private = false;
+      something_changed = true;
+      nmea_changed = true; 
+    }
+
     if(nmea_mux_port != web_server.arg("muxport").toInt())
     {
       nmea_mux_port = web_server.arg("muxport").toInt();
@@ -1502,25 +1557,36 @@ void handleOther()
   page += "<h4>" + error_message + "</h4>";
 
   page += "<form method='post' action='/other'>";
+
+  page += "<label for='lname'>Device Login: </label>";
+  page += "<input name='lname' value='" + web_interface_username + "' autofocus><br>";
+  page += "<label for='lpassone'>Device Password: </label>";
+  page += "<input name='lpassone' type='password' maxlength='32'><br>";
+  page += "<label for='lpasstwo'>Repeat: </label>";
+  page += "<input name='lpasstwo' type='password' maxlength='32'><br>";
+  page += "<label for='localname'>.local Name: </label>";
+  page += "<input name='localname' value='" + mdns_name + "'><br>";
+
   page += "<label for='muxon'>NMEA Output: </label>";
   page += "<input type='checkbox' name='muxon' value='yes'";
   if(nmea_mux_on)
   {
     page += " checked";
   }
-  page += "/><br/>";
+  page += "><br>";
   page += "<label for='muxport'>NMEA Port: </label>";
-  page += "<input type='number' name='muxport' length='5' maxlength='5' value='" + String(nmea_mux_port) + "' ><br/>";
-  page += "<label for='lname'>Device Login: </label>";
-  page += "<input name='lname' value='" + web_interface_username + "'/><br/>";
-  page += "<label for='lpassone'>Device Password: </label>";
-  page += "<input name='lpassone' type='password' maxlength='32'/><br/>";
-  page += "<label for='lpasstwo'>Repeat: </label>";
-  page += "<input name='lpasstwo' type='password' maxlength='32'/><br/>";
-  page += "<label for='localname'>.local Name: </label>";
-  page += "<input name='localname' value='" + mdns_name + "'/><br/>";
+  page += "<input type='number' name='muxport' length='5' maxlength='5' value='" + String(nmea_mux_port) + "' ><br>";
+  page += "<label for='muxprivate'>Only Private NMEA: </label>";
+  page += "<input type='checkbox' name='muxprivate' value='yes'";
+  if(nmea_mux_private)
+  {
+    page += " checked";
+  }
+  page += "><br>";
+
+
   page += "<button type='submit' name='savebutton' value='True'>Save</button>";
-  page += "</form></div><br/>";
+  page += "</form></div><br>";
 
 
 
@@ -1626,22 +1692,22 @@ void handleAdvanced()
   {
     page += " checked";
   }
-  page += "><br/>";
+  page += "><br>";
   page += "<label for='fhserver'>FloatHub Server: </label>";
-  page += "<input name='fhserver' value='" + float_hub_server + "'/><br/>";
+  page += "<input name='fhserver' value='" + float_hub_server + "'><br>";
   page += "<label for='fhport'>Port: </label>";
-  page += "<input type='number' name='fhport' length='5' maxlength='5' value='" + String(float_hub_server_port) + "' ><br/>";
+  page += "<input type='number' name='fhport' length='5' maxlength='5' value='" + String(float_hub_server_port) + "' ><br>";
   page += "<label for='vserialon'>Virtual Terminal: </label>";
   page += "<input type='checkbox' name='vserialon' value='yes'";
   if(virtual_serial_on)
   {
     page += " checked";
   }
-  page += "><br/>";
+  page += "><br>";
   page += "<label for='vsport'>Port: </label>";
-  page += "<input type='number' name='vsport' length='5' maxlength='5' value='" + String(virtual_serial_port) + "' ><br/>";
+  page += "<input type='number' name='vsport' length='5' maxlength='5' value='" + String(virtual_serial_port) + "' ><br>";
   page += "<button type='submit' name='savebutton' value='True'>Save</button>";
-  page += "</form></div><br/>";
+  page += "</form></div><br>";
 
 
 
@@ -1769,7 +1835,7 @@ void handleAccount()
 
   page += "<form method='post' action='/account'>";
   page += "<label for='deviceid'>Device ID: </label>";
-  page += "<input name='deviceid' value='" + float_hub_id + "' style='width: 250px; font-size: 9pt;'/><br/>";
+  page += "<input name='deviceid' value='" + float_hub_id + "' style='width: 250px; font-size: 9pt;' autofocus><br>";
   page += "<label for='aeskey'>Security Key: </label>";
   page += "<input name='aeskey' value='";
 
@@ -1782,9 +1848,9 @@ void handleAccount()
     page += String(float_hub_aes_key[i], HEX);
   }
 
-  page += "' style='width: 250px; font-size: 9pt;'/><br/>";
+  page += "' style='width: 250px; font-size: 9pt;'><br>";
   page += "<button type='submit' name='savebutton' value='True'>Save</button>";
-  page += "</form></div><br/>";
+  page += "</form></div><br>";
 
   page += FPSTR(HTTP_HOMEB);
   page += FPSTR(HTTP_CLOSE);
@@ -1795,12 +1861,71 @@ void handleAccount()
 
 void handleLogo()
 {
-  web_server.sendContent_P(FLOATHUB_LOGO, sizeof(FLOATHUB_LOGO) );
+  web_server.sendHeader(F("Cache-Control"), F("max-age=3600"));
+  web_server.send_P(200, "image/png", FLOATHUB_LOGO, sizeof(FLOATHUB_LOGO) );
 }
 
 void handleFavicon()
 {
-  web_server.sendContent_P(FLOATHUB_FAVICON, sizeof(FLOATHUB_FAVICON) );
+  web_server.sendHeader(F("Cache-Control"), F("max-age=3600"));
+  web_server.send_P(200, "image/ico", FLOATHUB_FAVICON, sizeof(FLOATHUB_FAVICON) );
+}
+
+#ifdef FILE_SERVE_ON
+void handleFile()
+{
+  #ifdef HTTP_DEBUG_ON
+  debug_info(F("Enter handleFile()"));
+  #endif
+
+  String page = "";
+  if(web_server.hasArg("f"))
+  {
+      File f = SPIFFS.open("/" + web_server.arg("f"), "r");
+      if(!f)
+      {
+        page = F("No such file or dromedary");
+      }
+      else
+      {
+        page = "Opened file, contents are \"";
+        while(f.available())
+        {
+          page += (char) f.read();
+        }
+        f.close();
+        page += "\"<br><br>";
+        if(web_server.hasArg("d") && web_server.arg("d") == "1")
+        {
+	  page += "Attempting to delete ...<br>";
+          if (SPIFFS.remove("/" + web_server.arg("f")))
+          {
+            page += "SUCCESS!";
+          }
+          else
+          {
+            page += "DRAT!";
+          }
+
+        }
+      }
+      f.close();
+    String page = FPSTR(HTTP_INITA);
+  }
+
+  web_server.send ( 200, "text/html", page );
+
+}
+#endif
+
+void signalBusy()
+{
+  digitalWrite(serial_ready_pin, LOW);
+}
+
+void signalIdle()
+{
+  digitalWrite(serial_ready_pin, HIGH);
 }
 
 void displayCurrentVariables()
@@ -1846,6 +1971,7 @@ void displayCurrentVariables()
   help_info(String(F("D=")) + public_static_dns.toString()); 
   help_info(String(F("N=")) + nmea_mux_on); 
   help_info(String(F("n=")) + nmea_mux_port); 
+  help_info(String(F("e=")) + nmea_mux_private); 
   help_info(String(F("u=")) + web_interface_username); 
   help_info(String(F("U=")) + web_interface_password); 
   help_info(String(F("P=")) + phone_home_on); 
@@ -1904,48 +2030,21 @@ void showFileList(bool actually_show = true)
   }
 }
 
-
-void popMessageQueue()
+bool nukeOldestFile()
 {
-
-  if(!filesystem_is_working)
+  if(!SPIFFS.remove("/" + String(low_file_pointer)))
   {
-    return;
-  }
-
-  if(low_file_pointer > 0)
-  {
-    latest_message_from_file = true;
     #ifdef FILE_DEBUG_ON
-    debug_info(F("Rebuilding message ..."));
+    debug_info(F("Can't delete file"), (int) low_file_pointer);
     #endif
-    File f = SPIFFS.open("/" + String(low_file_pointer), "r");
-    if(!f)
-    {
-      debug_info("Oy Vey!");
-      return;
-    }
-    latest_message_to_send = "";
-    while(f.available())
-    {
-      latest_message_to_send += (char) f.read();
-    }
-    f.close();
-    #ifdef FILE_DEBUG_ON
-    debug_info(F("... done"));
-    #endif
+    return false;
   }
-
+  low_file_pointer += 1; 
+  return true;
 }
-
-
-
-
-
 
 bool initFileSystem()
 {
-  File checker = SPIFFS.open("/floathub.txt","r");
   help_info(F("Formatting new filesystem"));
   if(!SPIFFS.format())
   {
@@ -1953,7 +2052,7 @@ bool initFileSystem()
     filesystem_is_working = false;
     return false;
   }
-  checker = SPIFFS.open("/floathub.txt","w");
+  File checker = SPIFFS.open("/floathub.txt","w");
   if(!checker)
   {
     help_info(F("BROKEN FILE SYSTEM B"));
@@ -1965,6 +2064,82 @@ bool initFileSystem()
   filesystem_is_working = true;
   return true;
 }
+
+
+void popMessageQueue()
+{
+
+  if(!filesystem_is_working)
+  {
+    return;
+  }
+
+  if(low_file_pointer > 0)
+  {
+    latest_message_to_send == "";
+    while(latest_message_to_send.length() == 0 && low_file_pointer <= high_file_pointer && low_file_pointer > 0)
+    {
+      File f = SPIFFS.open("/" + String(low_file_pointer), "r");
+      if(!f)
+      {
+        #ifdef FILE_DEBUG_ON
+        debug_info("Bad File/Mess. Rebuild");
+        #endif
+        if(!nukeOldestFile())
+        {
+	   #ifdef FILE_DEBUG_ON
+           debug_info(F("popMess failed to Nuke, BAD"));
+           #endif
+           initFileSystem();
+           low_file_pointer = 0;
+           high_file_pointer = 0;
+        }
+        if(low_file_pointer > high_file_pointer)
+        {
+          low_file_pointer = 0;
+          high_file_pointer = 0;
+	}
+      }
+      else
+      {
+        while(f.available())
+        {
+          latest_message_to_send += (char) f.read();
+        }
+        f.close();
+        if(latest_message_to_send.length() < 1)
+        {
+          #ifdef FILE_DEBUG_ON
+          debug_info("Empty Message in Rebuild attempt");
+          #endif
+          if(!nukeOldestFile())
+          {
+	    #ifdef FILE_DEBUG_ON
+            debug_info(F("popM failed to Nuke, BAD"));
+            #endif
+            initFileSystem();
+            low_file_pointer = 0;
+            high_file_pointer = 0;
+          }
+          if(low_file_pointer > high_file_pointer)
+          {
+            low_file_pointer = 0;
+            high_file_pointer = 0;
+	  }
+        }
+        else
+        {
+          latest_message_from_file = true;
+        }
+      }  
+    }
+  }
+}
+
+
+
+
+
 
 void setupFileSystem()
 {
@@ -2003,7 +2178,15 @@ void setup(void)
   latest_message_to_send = "";
   wifi_read_buffer = "";
 
+
+  //
+  //  Set up communicatinons to the Mega
+  //
+
   Serial.begin ( 115200 );
+  serial_ready_pin = 5;
+  pinMode(serial_ready_pin, OUTPUT);
+  signalBusy();
 
   //
   // Seed the random number generator so our cookie values are reasonably (pseudo-)random
@@ -2067,6 +2250,9 @@ void setup(void)
   web_server.on ( "/account", handleAccount );
   web_server.on ( "/reboot", handleReboot );
   web_server.onNotFound(handleLogin);
+  #ifdef FILE_SERVE_ON
+  web_server.on ( "/file", handleFile ); 
+  #endif
 
   //
   //  Set which headers to keep track of
@@ -2082,11 +2268,12 @@ void setup(void)
 
 
   //
-  // Answer to floathub.local, even on the Private WiFi side
+  // Answer to e on the Private WiFi side
   //
 
-  dns_server.setErrorReplyCode(DNSReplyCode::NoError);
-  dns_server.start(53, "floathub.local", WiFi.softAPIP());
+  // dns_server.setErrorReplyCode(DNSReplyCode::NoError);
+  //dns_server.start(53, "floathub.local", WiFi.softAPIP());
+  //dns_server.start(53, "*", WiFi.softAPIP());
 
 
   //
@@ -2110,6 +2297,12 @@ void setup(void)
     popMessageQueue();
     latest_message_from_file = true;
   }
+
+  //
+  // Set watchdog timestamp
+  //
+
+  watchdog_timestamp = millis();
 }
 
 void echoNMEA(String a_message)
@@ -2125,16 +2318,6 @@ void echoNMEA(String a_message)
     }
   }
 }
-
-void nukeOldestFile()
-{
-  if(!SPIFFS.remove("/" + String(low_file_pointer)))
-  {
-    debug_info(F("Can't delete file"), (int) low_file_pointer);
-  }
-  low_file_pointer += 1; 
-}
-
 
 void pushMessageQueue(String a_message)
 {
@@ -2152,10 +2335,12 @@ void pushMessageQueue(String a_message)
 
     long int space_left = fs_info.totalBytes - fs_info.usedBytes;
 
-    if(space_left > 1024)
+    if(space_left > MIN_SPIFF_SPACE)
     {
       #ifdef FILE_DEBUG_ON
       debug_info(F("Enough free: "), (int) space_left);
+      debug_info(F("      Total: "), (int) fs_info.totalBytes);
+      debug_info(F("       Used: "), (int) fs_info.usedBytes);
       #endif
       
     }
@@ -2164,35 +2349,75 @@ void pushMessageQueue(String a_message)
       #ifdef FILE_DEBUG_ON
       debug_info(F("Not enough free: "), (int) space_left);
       #endif
-      while(space_left <= 1024)
+      while(space_left <= MIN_SPIFF_SPACE)
       {
         popMessageQueue();
-        nukeOldestFile();
+        if(!nukeOldestFile())
+        {
+	   #ifdef FILE_DEBUG_ON
+           debug_info(F("pushM failed to Nuke, BAD"));
+           #endif
+           initFileSystem();
+           low_file_pointer = 0;
+           high_file_pointer = 0;
+        }
         SPIFFS.info(fs_info);
         space_left = fs_info.totalBytes - fs_info.usedBytes;
       } 
     }
 
-    high_file_pointer += 1;
-    if(low_file_pointer == 0)
-    {
-      low_file_pointer += 1;
-    }
-    
     //
     // Create a file called high_file_pointer and write the message inside it
     //
 
-    File f = SPIFFS.open("/" + String(high_file_pointer), "w");
+    File f = SPIFFS.open("/" + String(high_file_pointer + 1), "w");
     if(!f)
     {
-      debug_info("very bad, can't creat file");
+      bool keep_going = true;
+      while(keep_going)
+      {
+        popMessageQueue();
+        if(!nukeOldestFile())
+        {
+	  #ifdef FILE_DEBUG_ON
+          debug_info(F("pushMess failed to Nuke, BAD"));
+          #endif
+          initFileSystem();
+          low_file_pointer = 0;
+          high_file_pointer = 0;
+        }
+        SPIFFS.info(fs_info);
+        space_left = fs_info.totalBytes - fs_info.usedBytes;
+        f= SPIFFS.open("/" + String(high_file_pointer + 1), "w");
+        if(f)
+        {
+          f.print(a_message);
+          high_file_pointer += 1;
+          keep_going = false;
+        }
+        if(low_file_pointer > high_file_pointer)
+        {
+          low_file_pointer = 0;
+          high_file_pointer = 0;
+          keep_going = false;
+          latest_message_to_send = a_message;
+          #ifdef FILE_DEBUG_ON
+          debug_info(F("Really bad, through out entire file history"));
+          #endif
+        }
+      }
     } 
     else
     {
       f.print(a_message);
-      f.close();
+      //f.close();
+      high_file_pointer += 1;
+      if(low_file_pointer == 0)
+      {
+        low_file_pointer += 1;
+      }
     }
+    f.close();
   }
   else
   {
@@ -2207,13 +2432,56 @@ void pushMessageQueue(String a_message)
 
 void queueMessage(String a_message)
 {
+  //
+  //   Check a few things
+  //
+
+  int checksum_start = a_message.lastIndexOf('@');
+  if(checksum_start != a_message.length() - 3)
+  {
+    #ifdef INPT_DEBUG_ON
+    debug_info(F("Killed FHS message, no checksum"));
+    #endif
+    return;
+  }
+  String checksum_a = a_message.substring(checksum_start + 1);
+
+  a_message = a_message.substring(0, a_message.length() - 3);
+
+  byte a_byte;
+  for (int i = 0; i < a_message.length(); i++)
+  {
+    a_byte = a_byte ^ a_message.charAt(i); 
+  }
+
+  String checksum_b = String(a_byte, HEX);
+  checksum_b.toUpperCase();
+  if(checksum_b.length() < 2)
+  {
+    checksum_b = String(F("0")) + checksum_b;
+  } 
+
+  if(checksum_a != checksum_b)
+  {
+    #ifdef INPT_DEBUG_ON
+    debug_info(String(F("WOW WOW Killed bad FHS: ")) + checksum_a + String(F(" != ")) + checksum_b);
+    #endif
+    return;
+  }
+
   if(latest_message_to_send.length() == 0)
   {
+    #ifdef INPT_DEBUG_ON
+    debug_info(F("Queued Message, No File"));
+    #endif
     latest_message_to_send = a_message;
     latest_message_from_file = false;
   }
   else 
   {
+    #ifdef INPT_DEBUG_ON
+    debug_info(F("Pushing Message to File"));
+    #endif
     pushMessageQueue(a_message);
   }
 }
@@ -2329,6 +2597,18 @@ void parseInput(String &the_input)
   }
   #endif
 
+  else if(the_input.startsWith("factory"))
+  {
+    help_info("Doing factory reset ...");
+    init_eeprom_memory();
+    read_eeprom_memory();
+    initFileSystem();
+    delay(500);
+    ESP.eraseConfig();
+    delay(500);
+    ESP.reset();
+  }
+
   else if(the_input.charAt(0) == 'v')
   {
     displayCurrentVariables();
@@ -2337,15 +2617,6 @@ void parseInput(String &the_input)
   {
     showFileList();  
   } 
-
-  else if(the_input.startsWith("factory"))
-  {
-    help_info("Doing factory reset ...");
-    //init_eeprom_memory();
-    //read_eeprom_memory();
-    help_info("FIX THIS HACK");
-    initFileSystem();
-  }
 
   else if(the_input.startsWith("i=") && the_input.length() >= 10)
   {        
@@ -2667,6 +2938,28 @@ void parseInput(String &the_input)
   }
   #endif
 
+  else if(the_input.startsWith("e=") && the_input.length() >= 3)
+  {        
+    int new_value = the_input.substring(2).toInt();
+    if(the_input[2] == '0' || the_input[2] == '1')
+    { 	
+      processNewFlagValue("e=", nmea_mux_private, new_value);
+      kickNMEA();      
+    }
+    else
+    {
+      #ifdef INPT_DEBUG_ON
+      debug_info(F("Bad boolean"));
+      #endif
+    }
+  }
+  #ifdef INPT_DEBUG_ON
+  else if(the_input.startsWith("e="))
+  {
+    debug_info(F("Short input"));
+  }
+  #endif
+
   else if(the_input.startsWith("n=") && the_input.length() >= 3)
   {
     int new_value = the_input.substring(2).toInt();
@@ -2843,6 +3136,8 @@ void virtualSerialHouseKeeping()
 
 bool openFdr()
 {
+
+
   // Open a connection to the floathub server (usually fdr.floathub.net)
 
 
@@ -2871,19 +3166,17 @@ bool openFdr()
 
 bool push_latest_message_out_socket()
 {
-
+  int how_many;
   if(fdr_client.connected())
   {
-    if(fdr_client.write(latest_message_to_send.c_str(), latest_message_to_send.length()) == latest_message_to_send.length())
+    String string_to_send = latest_message_to_send + "\r\n";
+    how_many = fdr_client.write(string_to_send.c_str(), string_to_send.length());
+    if(how_many == string_to_send.length())
     {
-      if(fdr_client.write("\r\n", 2) == 2)
-      {
-        return true;
-      }
-
+      return true;
     }
     #ifdef WIFI_DEBUG_ON
-    debug_info("Socket write failed");
+    debug_info(String(F("Socket write failed, tried ")) + String(string_to_send.length()) + String(F(", got ")) + String(how_many));
     #endif
     return false;
   }
@@ -2913,6 +3206,19 @@ void houseKeeping()
     {
        nukeCookie(i);
     }
+  }
+
+  //
+  // Check that we have managed to send something at some point in rcent
+  // past, otherwise reboot the whole canoodle
+  //
+
+  if(millis() - watchdog_timestamp > WATCHDOG_TIME_LIMIT )
+  {
+    #ifdef WIFI_DEBUG_ON
+    debug_info(F("Watchdog hit, rebooting all ..."));
+    #endif
+    ESP.restart();
   }
 }
 
@@ -2980,6 +3286,7 @@ void fdrHouseKeeping()
             #endif
             current_communication_state = waiting_for_response;
             wifi_read_buffer = "";
+            expected_fdr_response_time = millis() + FDR_RESPONSE_MAX ;
           }
           #ifdef WIFI_DEBUG_ON
           else
@@ -3011,6 +3318,10 @@ void fdrHouseKeeping()
         //
         // Yay! We have succesfully sent something
         //
+   
+        watchdog_timestamp = millis();
+
+        //
 	// Adjust message pointers if need be
         //
         
@@ -3018,8 +3329,16 @@ void fdrHouseKeeping()
         {
           if(low_file_pointer > 0)
           {
-            nukeOldestFile();
-            if(low_file_pointer > high_file_pointer)
+            if(!nukeOldestFile())
+            {
+	      #ifdef FILE_DEBUG_ON
+              debug_info(F("HouseK failed to Nuke, BAD"));
+              #endif
+              initFileSystem();
+              low_file_pointer = 0;
+              high_file_pointer = 0;
+            }
+            else if(low_file_pointer > high_file_pointer)
             {
 	      // We have emptied the queue ..
               low_file_pointer = 0;
@@ -3061,6 +3380,14 @@ void fdrHouseKeeping()
           current_communication_state = idle;
 	}
       }
+      else if (millis() > expected_fdr_response_time)
+      {
+        #ifdef WIFI_DEBUG_ON
+        debug_info(F("Died waiting FHR"));
+        #endif
+        current_communication_state = idle;
+        fdr_client.stop();
+      }
     }
   }
   else
@@ -3072,23 +3399,40 @@ void fdrHouseKeeping()
 
 void readConsole()
 {
-  while(Serial.available() && (int) console_read_buffer.length() < MAX_CONSOLE_BUFFER)
+  
+
+  signalIdle();
+  unsigned long right_right_now = millis();
+
+
+  //
+  //  Signal we are available, then wait up to 2 full seconds for data to come
+  //
+
+  while((Serial.available() && (int) console_read_buffer.length() < MAX_CONSOLE_BUFFER) || (millis() - right_right_now) < 2000UL)
   {
-     int incoming_byte = Serial.read();
-     if(incoming_byte == '\r')
-     {
-       parseInput(console_read_buffer);
-       console_read_buffer = "";
-     }
-     else if (incoming_byte == '\n')
-     {
-       // don't do anything
-     }
-     else
-     {
-       console_read_buffer += String((char) incoming_byte);
-     }
+    if(Serial.available() && (int) console_read_buffer.length() < MAX_CONSOLE_BUFFER)
+    {
+      int incoming_byte = Serial.read();
+      if(incoming_byte == '\r')
+      { 
+        signalBusy();
+        right_right_now -= 2000UL;
+        parseInput(console_read_buffer);
+        console_read_buffer = "";
+      }
+      else if (incoming_byte == '\n')
+      {
+        // don't do anything
+      }
+      else
+      {
+        console_read_buffer += String((char) incoming_byte);
+      }
+    } 
   }
+
+
   if((int) console_read_buffer.length() >= MAX_CONSOLE_BUFFER - 1 )
   {
     #ifdef INPT_DEBUG_ON
@@ -3098,6 +3442,7 @@ void readConsole()
     #endif
     console_read_buffer = "";
   }
+  signalBusy();
 }
 
 
@@ -3119,7 +3464,6 @@ void loop(void)
   {
     fdr_communications_previous_timestamp = current_timestamp;
     fdrHouseKeeping();
-
   }
   if(current_timestamp - console_previous_timestamp > console_read_interval)
   {
@@ -3131,7 +3475,6 @@ void loop(void)
   {
     house_keeping_previous_timestamp = current_timestamp;
     houseKeeping();
-
   }
  
   if(current_timestamp - nmea_housekeeping_previous_timestamp > nmea_housekeeping_interval)
@@ -3145,11 +3488,15 @@ void loop(void)
   {
     virtual_serial_housekeeping_previous_timestamp = current_timestamp;
     virtualSerialHouseKeeping();
-
   } 
 
-  dns_server.processNextRequest();
-  web_server.handleClient();
+
+  if(current_timestamp - network_previous_timestamp > network_interval)
+  {
+    dns_server.processNextRequest();
+    web_server.handleClient();
+  }
+  
 }
 
 

@@ -64,18 +64,11 @@
   into other incoming NMEA (on NMEA in).
  
  
-  Nov. 6  2012
+   May 2013
   
-  Working _extremely_ well now, including active sensor, data storage when
-  GPRS unavailable, etc.  Remaining task; cleanout enough string stuff, then
-  implement NMEA input on Serial2.
-
-
- 
-  March, 2013
-
-  Moved to a proper text-based build environment and versioning system on
-  git-hub.
+  Added NMEA input to the mix, so basic feature complete with NMEA,
+  encryption, etc.  Added protocol/encryption version info to the protocol
+  itself, plus numbering of pumps, batteries and chargers. 
 
 
   April, 2013
@@ -83,11 +76,20 @@
   Brought in encrypted/$FHS code that was working back in July and made it
   trunk. It encrypts content using aes-128-cbc encryption
 
-  May 2013
+ 
+ March, 2013
+
+  Moved to a proper text-based build environment and versioning system on
+  git-hub.
+
+
+  Nov. 6  2012
   
-  Added NMEA input to the mix, so basic feature complete with NMEA,
-  encryption, etc.  Added protocol/encryption version info to the protocol
-  itself, plus numbering of pumps, batteries and chargers. 
+  Working _extremely_ well now, including active sensor, data storage when
+  GPRS unavailable, etc.  Remaining task; cleanout enough string stuff, then
+  implement NMEA input on Serial2.
+
+
  
 */
 
@@ -101,6 +103,7 @@
 #include <avr/wdt.h>
 #include <util/crc16.h>
 #include <SPI.h>
+#include <SoftwareSerial.h>
 
 #include "sometypes.h"
 
@@ -117,6 +120,9 @@
 //#define BYPASS_AES_ON
 //#define BARO_DEBUG_ON	
 //#define ACTIVE_DEBUG_ON
+//#define SERIAL_DEBUG_ON
+
+
 
 /*
   Anything which changes what the Floathub Data Receiver (fdr) needs to do
@@ -130,7 +136,7 @@
   Some AES variables
 */
 
-#define MAX_AES_CIPHER_LENGTH 1024
+#define MAX_AES_CIPHER_LENGTH 800
 AES aes;
 byte iv[16];
 byte volatile_iv[16];
@@ -142,10 +148,20 @@ byte cipher[MAX_AES_CIPHER_LENGTH];
   Various communication and account settings/data
 */
 
-String        float_hub_id;			// default: outofbox
-byte          float_hub_aes_key[16]; 
-bool	      currently_connected = false;
-unsigned long boot_counter;			
+String          float_hub_id;			// default: outofbox
+byte            float_hub_aes_key[16]; 
+bool	        currently_connected = false;
+unsigned long   boot_counter;			
+boolean         led_state = false;              //  For cycling on and off  
+#define		ESP8266_SERIAL_READY_PIN 2	//  ESP8266 sets this HIGH to say it is ready for more serial data
+#define		ESP8266_RESET_PIN  3		//  Pin we drive to ground to reset the esp8266 programmatically from here
+#define         USER_RESET_PIN    4		//  Pin that signals when user is holding down the reset button
+bool		user_reset_pin_state;		//  Measured state of user reset pin; 
+unsigned long	user_reset_pin_timestamp = 0;	//  Last time the user rest pin was initially pushed in
+#define         USER_RESET_REBOOT_TIME 5000	//  Hold down reset pin for 5 seconds to make device reboot
+#define         USER_RESET_FACTORY_TIME 20000	//  Hold down reset pin for 20 seconds to make device factory reset
+int		send_message_failures = 0;	//  Number of times we can fail to send something to ESP8266 before we dual reboot
+#define		MAX_SEND_MESSAGE_FAILURES 5
 
 /*
   Status LED's
@@ -188,16 +204,16 @@ unsigned long gps_interval = 50;                  	//  Read GPS serial
 unsigned long voltage_interval = 5000;            	//  Check batteries/chargers every 5 second
 unsigned long pump_interval = 1200;               	//  Check pump state every 1.2 seconds
 unsigned long active_reporting_interval = 30000;  	//  When in use, report data every 30 seconds
-unsigned long idle_reporting_interval = 600000;   	//  When idle, report data every 10 minutes
+unsigned long idle_reporting_interval = 10000;   	  
+//unsigned long idle_reporting_interval = 600000;   	//  When idle, report data every 10 minutes
 unsigned long console_reporting_interval = 5000;  	//  Report to USB console every 5 seconds  
 unsigned long console_interval = 250;             	//  Check console for input every 250 milliseconds
 unsigned long esp8266_interval = 100;			//  Check for input from esp8266 on Serial 1  
-unsigned long gprs_or_wifi_watchdog_interval = 120000;  //  Reboot the GPRS/wifi module after 2 minutes of no connection
 unsigned long led_update_interval = 200;          	//  Update the LED's every 200 miliseconds
 unsigned long nmea_update_interval = 100;         	//  Update NMEA in serial line every 1/10 of a second
+unsigned long hsnmea_update_interval = 100;		//  Update HS NMEA (SoftwareSerial based) every 1/10 of a second 
 unsigned long hardware_watchdog_interval = 120000; 	//  Do a hardware reset if we don't pat the dog every 2 minutes
 unsigned long nmea_sample_interval = 30000;		//  Nuke nmea data older than 30 seconds
-boolean com_led_state = false;         	  		//  For cycling on and off  
   
 unsigned long sensor_previous_timestamp = 0;
 unsigned long gps_previous_timestamp = 0;
@@ -210,6 +226,7 @@ unsigned long console_previous_timestamp = 0;
 unsigned long esp8266_previous_timestamp =0;
 unsigned long led_previous_timestamp = 0;
 unsigned long nmea_previous_timestamp = 0;
+unsigned long hsnmea_previous_timestamp = 0;
 unsigned long hardware_watchdog_timestamp = 0;
 unsigned long nmea_speed_water_timestamp = 0;
 unsigned long nmea_depth_water_timestamp = 0;
@@ -217,20 +234,23 @@ unsigned long nmea_wind_speed_timestamp = 0;
 unsigned long nmea_wind_direction_timestamp = 0;
 unsigned long nmea_water_temperature_timestamp = 0;
 
+
+/*
+  Software Serial Stuff
+*/
+
+
+#define SOFT_SERIAL_RX_PIN 10
+#define SOFT_SERIAL_TX_PIN 11  // We don't actually currently use this for anything    
+SoftwareSerial soft_serial (SOFT_SERIAL_RX_PIN, SOFT_SERIAL_TX_PIN); 
+
+
 /*
   Is the device currently "active" (i.e. is the vessel in movement and sending high frequency updates)?
 */
   
 bool currently_active = true;
 
-
-/*
-  Watchdog variables
-*/
-  
-long gprs_or_wifi_watchdog_timestamp = 0;
-int  gprs_or_wifi_watchdog_counter = 0;
-#define WATCHDOG_COUNTER_MAX	12
 
 /*
 
@@ -252,14 +272,14 @@ float temperature_history[BARO_HISTORY_LENGTH];
 */
 
 #define	MAX_CONSOLE_BUFFER  255
-#define MAX_GPS_BUFFER	    200
-#define MAX_WIFI_BUFFER	     64
+#define MAX_GPS_BUFFER	    100
 #define	MAX_NMEA_BUFFER	    100
 
 String console_read_buffer;
 String esp8266_read_buffer;
 String gps_read_buffer;
 String nmea_read_buffer;
+String hsnmea_read_buffer;
 byte nmea_cycle;
 
 bool           gps_valid = false;
@@ -352,39 +372,26 @@ void gps_setup()
   //  Setup gps on serial device 3, and make it send only GGA and RMC NMEA sentences
   //
 
-  Serial1.begin(115200);
-
   Serial3.begin(9600);
   delay(1000);
 
   //
-  //	Really Old GPS
+  //	Configure in case the GPS is a MTK3339 / Ultimate GPS breakout from Adafruit
   //
 
-  /*
-  Serial3.begin(4800);
-  Serial3.println("$PSTMNMEACONFIG,0,4800,66,1");
-  Serial3.println(F("$PSRF103,00,00,02,01*26"));  //  GGA ON every 2 seconds
-  Serial3.println(F("$PSRF103,01,00,00,01*25"));  //  GLL OFF
-  Serial3.println(F("$PSRF103,02,00,00,01*26"));  //  GSA OFF
-  Serial3.println(F("$PSRF103,03,00,00,01*27"));  //  GSV OFF
-  Serial3.println(F("$PSRF103,04,00,02,01*22"));  //  RMC ON every 2 seconds
-  Serial3.println(F("$PSRF103,05,00,00,01*21"));  //  VTG Off
-  */
-  
+  Serial3.println(F("$PMTK314,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0*28"));		// GGA & RMC every second
+
   //
-  //	Old GPS on Serial 
-  //	MTK3339 / Ultimate GPS breakout from Adafruit
-  //
-  
- 
-  //Serial3.println("$PMTK314,0,2,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0*28");	// Every 2 seconds
-  //Serial3.println("$PMTK314,0,3,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0*2A");		// GGA every 1 second, RMC every 3
-  //Serial3.println("$PMTK314,0,3,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0*29");		// GGA every 2 second, RMC every 3
-  //Serial3.println("$PMTK314,0,5,0,3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0*2E");		// GGA every 3 second, RMC every 5
-  Serial3.println("$PMTK314,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0*28");		// GGA & RMC every second
-  //Serial3.println("$PMTK314,0,2,0,3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0*29");		// GGA every 3 second, RMC every 2
- 
+  //   	Or a uBlox NEO-6M
+  // 
+
+  Serial3.println("$PUBX,40,GLL,0,0,0,0,0,0*5C");
+  Serial3.println("$PUBX,40,GGA,0,1,0,0,0,0*5B"); 
+  Serial3.println("$PUBX,40,GSA,0,0,0,0,0,0*4E");
+  Serial3.println("$PUBX,40,RMC,0,1,0,0,0,0*46");
+  Serial3.println("$PUBX,40,GSV,0,0,0,0,0,0*59");
+  Serial3.println("$PUBX,40,VTG,0,0,0,0,0,0*5E");
+
 }
 
 
@@ -407,26 +414,8 @@ void pat_the_watchdog()
   //	As long as we've managed to communciate at some relatively recent point, pat the dog
   //
 
-    hardware_watchdog_timestamp = millis(); 
+  hardware_watchdog_timestamp = millis(); 
 
-/*
-  if(!gprs_or_wifi_communications_on)
-  {  
-  }
-  else if(gprs_or_wifi_watchdog_counter < WATCHDOG_COUNTER_MAX)
-  {
-    hardware_watchdog_timestamp = millis();   
-  }
-  else
-  {
-    #ifdef GPRS_DEBUG_ON
-    debug_info(F("No dog pat"));
-    #endif
-    #ifdef WIFI_DEBUG_ON
-    debug_info(F("No dog pat"));
-    #endif
-  }
-*/
 }
 
 void(* resetFunc) (void) = 0; //declare reset function @ address 0
@@ -581,6 +570,13 @@ void read_eeprom_memory()
 }  
 
 
+void resetESP()
+{
+  digitalWrite(ESP8266_RESET_PIN, LOW);
+  delay(3000);
+  digitalWrite(ESP8266_RESET_PIN, HIGH);
+}
+
 void setup()
 {
   
@@ -589,13 +585,33 @@ void setup()
   esp8266_read_buffer.reserve(MAX_CONSOLE_BUFFER);
   gps_read_buffer.reserve(MAX_GPS_BUFFER);
   nmea_read_buffer.reserve(MAX_NMEA_BUFFER);
+  hsnmea_read_buffer.reserve(MAX_NMEA_BUFFER);
   new_message.reserve(MAX_NEW_MESSAGE_SIZE);
   latest_message_to_send.reserve(MAX_LATEST_MESSAGE_SIZE);
   a_string.reserve(MAX_LATEST_MESSAGE_SIZE);
 
+
+  //
+  //  Serial1 is the ESP8266 (WiFi chip)
+  //
+
+  pinMode(ESP8266_SERIAL_READY_PIN, INPUT);
+  Serial1.begin(115200);
+
+  //
+  //  SoftwareSerial at 38400
+  //
+
+  pinMode(SOFT_SERIAL_RX_PIN, INPUT);
+  pinMode(SOFT_SERIAL_TX_PIN, OUTPUT);  
+  soft_serial.begin(38400);
+  soft_serial.listen();
+  
+
   bmp_setup();
   gps_setup();
   latest_message_to_send = "";
+  send_message_failures = 0;
   
   //
   //  Setup main serial port for local data monitoring
@@ -631,6 +647,7 @@ void setup()
   digitalWrite(COM_LED_1, HIGH);
   digitalWrite(COM_LED_2, LOW);
 
+  led_state = false;
 
   //
   //  Handle EEPROM logic for persistant settings (if the first 6 bytes of
@@ -664,12 +681,26 @@ void setup()
   watchdog_setup();
   
 
+
+
+  //
+  //	Setup User-Reset and ESP-Reset pins
+  //
+
+  pinMode(USER_RESET_PIN, INPUT);
+  user_reset_pin_state = LOW;
+  user_reset_pin_timestamp = 0;
+
+  pinMode(ESP8266_RESET_PIN, OUTPUT);
+  digitalWrite(ESP8266_RESET_PIN, HIGH);
+
+
   //
   //  Announce we are up
   //
   
 
-  help_info("Up and running...");
+  help_info(F("Up and running..."));
   display_current_variables();  
 
 }
@@ -685,30 +716,31 @@ void help_info(String some_info)
    Serial.println(some_info);
 }
 
+
 void display_current_variables()
 {
-  new_message = "code=";
+  new_message = F("code=");
   new_message += FLOATHUB_PROTOCOL_VERSION;
-  new_message += ".";
+  new_message += F(".");
   new_message += FLOATHUB_ENCRYPT_VERSION;
   
-  new_message += ",m=";
+  new_message += F(",m=");
   new_message += FLOATHUB_MODEL_DESCRIPTION;
-  new_message += ",b=";
+  new_message += F(",b=");
   new_message += boot_counter;
   help_info(new_message);
   new_message = "";
 
-  String line = "i=";
+  String line = F("i=");
   line += float_hub_id;
   help_info(line);
   
-  line = "k=";
+  line = F("k=");
   for(i = 0; i < 16; i++)
   {
     if(float_hub_aes_key[i] < 16)
     {
-      line += "0";
+      line += F("0");
     }
     line += String(float_hub_aes_key[i], HEX);
   }
@@ -716,6 +748,14 @@ void display_current_variables()
   
 }
 
+bool esp8266IsReady()
+{
+  if(digitalRead(ESP8266_SERIAL_READY_PIN) == HIGH)
+  {
+    return true;
+  }
+  return false;
+}
 
 void add_checksum_and_send_nmea_string(String nmea_string)
 {
@@ -726,19 +766,32 @@ void add_checksum_and_send_nmea_string(String nmea_string)
     byte_zero = byte_zero ^ nmea_string.charAt(i);
   }
 
-  Serial2.print(a_string);   
-
   String checksum = String(byte_zero, HEX); 
   checksum.toUpperCase();
   if(checksum.length() < 2)
   {
-    nmea_string += "0";
+    nmea_string += F("0");
   }
   nmea_string += checksum;
 
+
+
   Serial2.println(nmea_string);
-  Serial1.print("E=");
-  Serial1.println(nmea_string);
+
+  if(esp8266IsReady())
+  {
+    Serial1.print(F("E="));
+    Serial1.println(nmea_string);
+    //Serial.println("Into flush A ...");
+    //Serial1.flush();
+    //Serial.println("Out of flush A");
+  }
+  #ifdef SERIAL_DEBUG_ON
+  else
+  {
+    debug_info(F("XA NMEA"));
+  }
+  #endif
 
 }
 
@@ -773,12 +826,12 @@ void bmp_read()
     float closest = abs(temperature_history[BARO_HISTORY_LENGTH - 1] - average);
     temperature = temperature_history[BARO_HISTORY_LENGTH - 1];
     #ifdef BARO_DEBUG_ON
-    debug_info("Temperature " + String(BARO_HISTORY_LENGTH) + ": ", temperature_history[BARO_HISTORY_LENGTH - 1]);
+    debug_info(F("Temperature ") + String(BARO_HISTORY_LENGTH) + F(": "), temperature_history[BARO_HISTORY_LENGTH - 1]);
     #endif
     for(int_one = BARO_HISTORY_LENGTH - 2; int_one >= 0; int_one--)
     {
       #ifdef BARO_DEBUG_ON
-      debug_info("Temperature " + String(int_one) + ": ", temperature_history[int_one]);
+      debug_info(F("Temperature ") + String(int_one) + F(": "), temperature_history[int_one]);
       #endif
       if(abs(temperature_history[int_one] - average) < closest)
       {
@@ -811,12 +864,12 @@ void bmp_read()
     float closest = abs(pressure_history[BARO_HISTORY_LENGTH - 1] - average);
     pressure = pressure_history[BARO_HISTORY_LENGTH - 1];
     #ifdef BARO_DEBUG_ON
-    debug_info("Pressure " + String(BARO_HISTORY_LENGTH) + ": ", pressure_history[BARO_HISTORY_LENGTH - 1]);
+    debug_info(F("Pressure ") + String(BARO_HISTORY_LENGTH) + F(": "), pressure_history[BARO_HISTORY_LENGTH - 1]);
     #endif
     for(int_one = BARO_HISTORY_LENGTH - 2; int_one >= 0; int_one--)
     {
       #ifdef BARO_DEBUG_ON
-      debug_info("Pressure " + String(int_one) + ": ", pressure_history[int_one]);
+      debug_info(F("Pressure ") + String(int_one) + F(": "), pressure_history[int_one]);
       #endif
       if(abs(pressure_history[int_one] - average) < closest)
       {
@@ -991,7 +1044,7 @@ void parse_gps_buffer_as_rmc()
 
   gps_utc  = gps_read_buffer.substring(time_start + 1, time_break);
   gps_utc += gps_read_buffer.substring(date_start + 1, var_start - 2);
-  gps_utc += "20";
+  gps_utc += F("20");
   gps_utc += gps_read_buffer.substring(var_start - 2, var_start);
 
   memset(temp_string, 0, 20 * sizeof(char));
@@ -1127,20 +1180,20 @@ void parse_gps_buffer_as_gga()
       
     
   gps_latitude  = gps_read_buffer.substring(lat_start + 1, lat_start + 3);
-  gps_latitude += " ";
+  gps_latitude += F(" ");
   gps_latitude += gps_read_buffer.substring(lat_start + 3, nors_start);
   while(gps_latitude.length() < 11)
   {
-    gps_latitude += "0";
+    gps_latitude += F("0");
   }
   gps_latitude += gps_read_buffer.substring(nors_start + 1, lon_start);
     
   gps_longitude  = gps_read_buffer.substring(lon_start + 1, lon_start + 4);
-  gps_longitude += " ";
+  gps_longitude += F(" ");
   gps_longitude += gps_read_buffer.substring(lon_start + 4, wore_start);
   while(gps_longitude.length() < 12)
   {
-    gps_longitude += "0";
+    gps_longitude += F("0");
   }
   gps_longitude += gps_read_buffer.substring(wore_start + 1, qual_start);
   
@@ -1160,19 +1213,52 @@ void parse_gps_buffer_as_gga()
   
 }
 
+
+void push_hsnmea_only_to_esp8266()
+{
+  if(!esp8266IsReady())
+  {
+    #ifdef SERIAL_DEBUG_ON
+    debug_info(F("XC NMEA"));
+    #endif
+    return;
+  }
+  Serial1.print(F("E="));
+  Serial1.println(hsnmea_read_buffer);
+  //Serial.println("Into flush B ...");
+  //Serial1.flush();
+  //Serial.println("Out of flush B");
+}
+
+
 void push_out_nmea_sentence(bool from_nmea_in)
 {
+
+  if(!esp8266IsReady())
+  {
+    #ifdef SERIAL_DEBUG_ON
+    debug_info(F("XB NMEA"));
+    #endif
+    return;
+  }
+
   if(from_nmea_in)
   {
     Serial2.println(nmea_read_buffer);
-    Serial1.print("E=");
+    Serial1.print(F("E="));
     Serial1.println(nmea_read_buffer);
+    //Serial.println("Into flush C ...");
+    //Serial1.flush();
+    //Serial.println("Out of flush C");
   }
   else
   {
     Serial2.println(gps_read_buffer);
-    Serial1.print("E=");
+    Serial1.print(F("E="));
     Serial1.println(gps_read_buffer);
+    //Serial.println("Into flush D ...");
+    //Serial1.flush();
+    //Serial.println("Out of flush D");
   }
 }
 
@@ -1194,7 +1280,7 @@ bool validate_gps_buffer()
 
 
   #ifdef GPS_DEBUG_ON
-  debug_info("Bad GPS buffer: " + gps_read_buffer);
+  debug_info(String(F("Bad GPS buffer: ")) + gps_read_buffer);
   #endif
   return false;  
 }
@@ -1213,21 +1299,49 @@ bool validate_and_maybe_remediate_gps_buffer()
   return false;
 }
 
-bool validate_nmea_buffer()
+bool validate_nmea_buffer(bool hsnmea = false)
 {
   byte_zero = 0;
-  for(i = nmea_read_buffer.indexOf('$') + 1; i < nmea_read_buffer.lastIndexOf('*'); i++)
+
+  if(hsnmea)
   {
-    byte_zero = byte_zero ^ nmea_read_buffer.charAt(i);
+    for(i = hsnmea_read_buffer.indexOf('!') + 1; i < hsnmea_read_buffer.lastIndexOf('*'); i++)
+    {
+      byte_zero = byte_zero ^ hsnmea_read_buffer.charAt(i);
+    }
+  }
+  else
+  {
+    for(i = nmea_read_buffer.indexOf('$') + 1; i < nmea_read_buffer.lastIndexOf('*'); i++)
+    {
+      byte_zero = byte_zero ^ nmea_read_buffer.charAt(i);
+    }
   }
   a_string = String(byte_zero, HEX);
   a_string.toUpperCase();
-  if(nmea_read_buffer.endsWith(a_string))
+  if(hsnmea)
   {
-    return true;
+    if(hsnmea_read_buffer.endsWith(a_string))
+    {
+      return true;
+    }
+  }
+  else
+  {
+    if(nmea_read_buffer.endsWith(a_string))
+    {
+      return true;
+    }
   }
   #ifdef NMEA_DEBUG_ON
-  debug_info("Bad NMEA buffer: " + nmea_read_buffer);
+  if(hsnmea)
+  {
+    debug_info(String(F("Bad NMEA buffer: ")) + hsnmea_read_buffer);
+  }
+  else
+  {
+    debug_info(String(F("Bad NMEA buffer: ")) + nmea_read_buffer);
+  }
   #endif
   return false;  
 }
@@ -1243,7 +1357,7 @@ void gps_read()
     {
       if(validate_and_maybe_remediate_gps_buffer())
       {
-        if(gps_read_buffer.indexOf("$GPRMC,") == 0)
+        if(gps_read_buffer.indexOf(F("$GPRMC,")) == 0)
         {
           #ifdef GPS_DEBUG_ON
           debug_info(F("--GPS BUF RMC--"));
@@ -1252,7 +1366,7 @@ void gps_read()
           push_out_nmea_sentence(false);
           parse_gps_buffer_as_rmc();
         }
-        else if(gps_read_buffer.indexOf("$GPGGA,") == 0)
+        else if(gps_read_buffer.indexOf(F("$GPGGA,")) == 0)
         {
           #ifdef GPS_DEBUG_ON
           debug_info(F("--GPS BUF GGA--"));
@@ -1284,13 +1398,13 @@ void gps_read()
 
 void voltage_read()
 {
-  battery_one 	= analogRead(3) / 37.213; 
+  battery_one 	= analogRead(1) / 37.213; 
   battery_two 	= analogRead(2) / 37.213;
-  battery_three = analogRead(1) / 37.213; 
+  battery_three = analogRead(3) / 37.213; 
 
-  charger_one 	= analogRead(6) / 37.213; 
+  charger_one 	= analogRead(4) / 37.213; 
   charger_two 	= analogRead(5) / 37.213; 
-  charger_three	= analogRead(4) / 37.213;
+  charger_three	= analogRead(6) / 37.213;
 }
 
 
@@ -1299,7 +1413,7 @@ void append_formatted_value(String &the_string, int value)
 {
   if(value < 10)
   {
-    the_string += "0";
+    the_string += F("0");
     the_string += value;
   }
   else
@@ -1310,7 +1424,7 @@ void append_formatted_value(String &the_string, int value)
 
 void add_timestamp_to_string(String &the_string)
 {
-  the_string += ",U:";
+  the_string += F(",U:");
   append_formatted_value(the_string, hour());
   append_formatted_value(the_string, minute());
   append_formatted_value(the_string, second());
@@ -1324,7 +1438,7 @@ void individual_pump_read(int pump_number, pump_state &state, int analog_input)
 {
   float pump_value = analogRead(analog_input) / 37.213;
   #ifdef PUMP_DEBUG_ON
-  debug_info("Pump " + String(pump_number) + " on input " + String(analog_input) + " reads ", pump_value);
+  debug_info(F("Pump ") + String(pump_number) + F(" on input ") + String(analog_input) + F(" reads "), pump_value);
   #endif
   if(pump_value > 2.0)
   {
@@ -1337,23 +1451,22 @@ void individual_pump_read(int pump_number, pump_state &state, int analog_input)
        #ifdef PUMP_DEBUG_ON
        debug_info(F("Pump turned on!"));
        #endif
-       new_message = "$FHB:";
+       new_message = F("$FHB:");
        new_message += float_hub_id;
-       new_message += ":";
+       new_message += F(":");
        new_message += FLOATHUB_PROTOCOL_VERSION;
-       new_message += "$";
+       new_message += F("$");
        if(gps_valid || timeStatus() != timeNotSet)
        {
          add_timestamp_to_string(new_message);
        }
-       new_message += ",P";
+       new_message += F(",P");
        new_message += pump_number;
-       new_message += ":1";
+       new_message += F(":1");
        
        latest_message_to_send = new_message;
        encode_latest_message_to_send();
        send_encoded_message_to_esp8266();
-       
        echo_info(new_message);
        state = on;       
      }
@@ -1369,19 +1482,19 @@ void individual_pump_read(int pump_number, pump_state &state, int analog_input)
        #ifdef PUMP_DEBUG_ON
        debug_info(F("Pump turned off!"));
        #endif
-       new_message = "$FHB:";
+       new_message = F("$FHB:");
        new_message += float_hub_id;
-       new_message += ":";
+       new_message += F(":");
        new_message += FLOATHUB_PROTOCOL_VERSION;
-       new_message += "$";
+       new_message += F("$");
 
        if(gps_valid|| timeStatus() != timeNotSet)
        {
          add_timestamp_to_string(new_message);
        }
-       new_message += ",P";
+       new_message += F(",P");
        new_message += pump_number;
-       new_message += ":0";
+       new_message += F(":0");
 
        latest_message_to_send = new_message;
        encode_latest_message_to_send();
@@ -1396,9 +1509,9 @@ void individual_pump_read(int pump_number, pump_state &state, int analog_input)
 
 void pump_read()
 {
-  individual_pump_read(1, pump_one_state, 9);
+  individual_pump_read(1, pump_one_state, 7);
   individual_pump_read(2, pump_two_state, 8);
-  individual_pump_read(3, pump_three_state, 7);
+  individual_pump_read(3, pump_three_state, 9);
 }
 
 
@@ -1417,76 +1530,77 @@ void possibly_append_data(float value, float test, String tag)
     append_float_to_string(new_message, value);
   }
 }
+
 void report_state(bool console_only)
 {
   if(console_only)
   {
-    new_message = "$FHC:";
+    new_message = F("$FHC:");
   }
   else
   {
-    new_message = "$FHA:";
+    new_message = F("$FHA:");
   }
 
   new_message += float_hub_id;
-  new_message += ":";
+  new_message += F(":");
   new_message += FLOATHUB_PROTOCOL_VERSION;
-  new_message += "$";
+  new_message += F("$");
   if(gps_valid == true || timeStatus() != timeNotSet )
   {
      add_timestamp_to_string(new_message);
   }
   
-  new_message += ",T:";
+  new_message += F(",T:");
   append_float_to_string(new_message, temperature);
 
-  new_message += ",P:";
+  new_message += F(",P:");
   append_float_to_string(new_message, pressure);
 
   if(gps_valid == true && gps_altitude.length() > 0)
   {
-    new_message += ",L:";
+    new_message += F(",L:");
     new_message += gps_latitude;
     
-    new_message += ",O:";
+    new_message += F(",O:");
     new_message += gps_longitude;
 
-    new_message += ",A:";
+    new_message += F(",A:");
     new_message += gps_altitude;
 
-    new_message += ",H:";
+    new_message += F(",H:");
     new_message += gps_hdp;
     
-    new_message += ",S:";
+    new_message += F(",S:");
     new_message += gps_sog;
 
-    new_message += ",B:";
+    new_message += F(",B:");
     new_message += gps_bearing_true;
   }
 
   if(gps_siv.length() > 0)
   {
-    new_message += String(",N:");
+    new_message += String(F(",N:"));
     new_message += gps_siv;
   }
 
-  possibly_append_data(battery_one, 0.2, ",V1:");
-  possibly_append_data(battery_two, 0.2, ",V2:");
-  possibly_append_data(battery_three, 0.2, ",V3:");
+  possibly_append_data(battery_one, 0.2, F(",V1:"));
+  possibly_append_data(battery_two, 0.2, F(",V2:"));
+  possibly_append_data(battery_three, 0.2, F(",V3:"));
 
-  possibly_append_data(charger_one, 0.2, ",C1:");
-  possibly_append_data(charger_two, 0.2, ",C2:");
-  possibly_append_data(charger_three, 0.2, ",C3:");
+  possibly_append_data(charger_one, 0.2, F(",C1:"));
+  possibly_append_data(charger_two, 0.2, F(",C2:"));
+  possibly_append_data(charger_three, 0.2, F(",C3:"));
 
   //
   //	Add NMEA data
   //
   
-  possibly_append_data(nmea_speed_water, -0.5, ",R:");
-  possibly_append_data(nmea_depth_water, -0.5, ",D:");
-  possibly_append_data(nmea_wind_speed, -0.5, ",J:");
-  possibly_append_data(nmea_wind_direction, -0.5, ",K:");
-  possibly_append_data(nmea_water_temperature, -0.5, ",Y:");
+  possibly_append_data(nmea_speed_water, -0.5, F(",R:"));
+  possibly_append_data(nmea_depth_water, -0.5, F(",D:"));
+  possibly_append_data(nmea_wind_speed, -0.5, F(",J:"));
+  possibly_append_data(nmea_wind_direction, -0.5, F(",K:"));
+  possibly_append_data(nmea_water_temperature, -0.5, F(",Y:"));
 
   if(!console_only)
   {
@@ -1495,15 +1609,16 @@ void report_state(bool console_only)
     send_encoded_message_to_esp8266();
   }
   echo_info(new_message);
+
 }
 
 void parse_esp8266()
 {
 
 
-  if(esp8266_read_buffer.startsWith("$FHI"))
+  if(esp8266_read_buffer.startsWith(F("$FHI")))
   {
-    if(esp8266_read_buffer.length() == 23 && esp8266_read_buffer.substring(20).startsWith("c="))
+    if(esp8266_read_buffer.length() == 23 && esp8266_read_buffer.substring(20).startsWith(F("c=")))
     {
       if(esp8266_read_buffer.charAt(22) == '1')
       {
@@ -1514,7 +1629,7 @@ void parse_esp8266()
         currently_connected = false;
       }
     }
-    else if(esp8266_read_buffer.length() >= 30 && esp8266_read_buffer.substring(20).startsWith("i="))
+    else if(esp8266_read_buffer.length() >= 30 && esp8266_read_buffer.substring(20).startsWith(F("i=")))
     {
       a_string = esp8266_read_buffer.substring(22,30);
       if(a_string != float_hub_id)
@@ -1523,7 +1638,7 @@ void parse_esp8266()
         write_eeprom_memory();
       }
     }
-    else if(esp8266_read_buffer.length() >= 54 && esp8266_read_buffer.substring(20).startsWith("k="))
+    else if(esp8266_read_buffer.length() >= 54 && esp8266_read_buffer.substring(20).startsWith(F("k=")))
     {
       char a_char;
       bool something_changed = false;
@@ -1570,7 +1685,6 @@ void parse_esp8266()
     // Otherwise, just show it on the console
     //
 
-    //Serial.print("ESP sent: ");
     Serial.println(esp8266_read_buffer);
   }
 }  
@@ -1582,8 +1696,6 @@ void parse_console()
   // push all input up the esp8266 on Serial1.
   //
 
-  Serial.print("Sending: ");
-  Serial.println(console_read_buffer);
   Serial1.println(console_read_buffer);
 
 }  
@@ -1657,6 +1769,7 @@ void debug_info_core(String some_info)
   Serial.print(F(":"));
   Serial.print(FLOATHUB_PROTOCOL_VERSION);
   Serial.print(F("$    "));
+  Serial.print(String(F("[")) + String(hour()) + F(":") + String(minute()) + F(":") + String(second()) + F("] "));
   Serial.print(some_info);
 }
 
@@ -1679,10 +1792,47 @@ void debug_info(String some_info, int x)
   Serial.println(x);
 }
 
-
-
 void update_leds()
 {
+
+  if(user_reset_pin_state == HIGH)
+  {
+    unsigned long current_timestamp = millis();
+    if(current_timestamp - user_reset_pin_timestamp < USER_RESET_REBOOT_TIME)
+    {
+      if(led_state)
+      {
+        digitalWrite(GPS_LED_1, LOW);
+        digitalWrite(GPS_LED_2, HIGH);
+        digitalWrite(COM_LED_1, LOW);
+        digitalWrite(COM_LED_2, HIGH);
+      }
+      else
+      {
+        digitalWrite(GPS_LED_1, LOW);
+        digitalWrite(GPS_LED_2, LOW);
+        digitalWrite(COM_LED_1, LOW);
+        digitalWrite(COM_LED_2, LOW);
+      }
+      led_state = !led_state;
+    }
+    else if (current_timestamp - user_reset_pin_timestamp > USER_RESET_REBOOT_TIME && current_timestamp - user_reset_pin_timestamp < USER_RESET_FACTORY_TIME)
+    {
+        digitalWrite(GPS_LED_1, LOW);
+        digitalWrite(GPS_LED_2, HIGH);
+        digitalWrite(COM_LED_1, LOW);
+        digitalWrite(COM_LED_2, HIGH);
+    }
+    else 
+    {
+        digitalWrite(GPS_LED_1, HIGH);
+        digitalWrite(GPS_LED_2, LOW);
+        digitalWrite(COM_LED_1, HIGH);
+        digitalWrite(COM_LED_2, LOW);
+    }
+    return;
+  }
+
 
   if(gps_valid)
   {
@@ -1736,9 +1886,9 @@ bool popout_nmea_value(String data_type, int comma_begin, int comma_end, float &
 
 void parse_nmea_sentence()
 {
-    #ifdef NMEA_DEBUG_ON
-    debug_info("NMEA buf:" + nmea_read_buffer);
-    #endif    
+  #ifdef NMEA_DEBUG_ON
+  debug_info(String(F("NMEA buf:")) + nmea_read_buffer);
+  #endif    
 
   int commas[8] = {-1, -1, -1, -1, -1, -1, -1 , -1};
 
@@ -1767,10 +1917,10 @@ void parse_nmea_sentence()
   //	Depth below transducer
   //
 
-  if( popout_nmea_value("DBT", commas[2], commas[3], nmea_depth_water))
+  if( popout_nmea_value(F("DBT"), commas[2], commas[3], nmea_depth_water))
   {
     #ifdef NMEA_DEBUG_ON
-    debug_info("NMEA d water:", nmea_depth_water);
+    debug_info(F("NMEA d water:"), nmea_depth_water);
     #endif    
     nmea_depth_water_timestamp = millis();
   }
@@ -1780,10 +1930,10 @@ void parse_nmea_sentence()
   //
 
 
-  else if( popout_nmea_value("MTW", commas[0], commas[1], nmea_water_temperature, true))
+  else if( popout_nmea_value(F("MTW"), commas[0], commas[1], nmea_water_temperature, true))
   {
     #ifdef NMEA_DEBUG_ON
-    debug_info("NMEA w temp:", nmea_water_temperature);
+    debug_info(F("NMEA w temp:"), nmea_water_temperature);
     #endif    
     nmea_water_temperature_timestamp = millis();
   }
@@ -1792,10 +1942,10 @@ void parse_nmea_sentence()
   //	Speed Through Water
   //
 
-  else if( popout_nmea_value("VHW", commas[4], commas[5], nmea_speed_water))
+  else if( popout_nmea_value(F("VHW"), commas[4], commas[5], nmea_speed_water))
   {
     #ifdef NMEA_DEBUG_ON
-    debug_info("NMEA s water:", nmea_speed_water);
+    debug_info(F("NMEA s water:"), nmea_speed_water);
     #endif    
     nmea_speed_water_timestamp = millis();
   }
@@ -1804,16 +1954,16 @@ void parse_nmea_sentence()
   //	Wind Speed and direction if speed works
   //
   
-  else if(  popout_nmea_value("MWV", commas[2], commas[3], nmea_wind_speed))
+  else if(  popout_nmea_value(F("MWV"), commas[2], commas[3], nmea_wind_speed))
   {
     #ifdef NMEA_DEBUG_ON
-    debug_info("NMEA w speed:", nmea_wind_speed);
+    debug_info(F("NMEA w speed:"), nmea_wind_speed);
     #endif
     nmea_wind_speed_timestamp = millis();
-    if(	popout_nmea_value("MWV", commas[0], commas[1], nmea_wind_direction))
+    if(	popout_nmea_value(F("MWV"), commas[0], commas[1], nmea_wind_direction))
     {
       #ifdef NMEA_DEBUG_ON
-      debug_info("NMEA w direction:", nmea_wind_direction);
+      debug_info(F("NMEA w direction:"), nmea_wind_direction);
       #endif
       nmea_wind_direction_timestamp = millis();
     }
@@ -1849,20 +1999,171 @@ void update_nmea()
   }
 }
 
-void send_encoded_message_to_esp8266()
+
+void update_hsnmea()
 {
-  Serial1.print("S=");
-  Serial1.println(latest_message_to_send);
+  while(soft_serial.available() && (int) hsnmea_read_buffer.length() < MAX_NMEA_BUFFER)
+  {
+    int incoming_byte = soft_serial.read();
+    if(incoming_byte == '\n')
+    {
+      if(validate_nmea_buffer(true))
+      {
+        push_hsnmea_only_to_esp8266();   //   We just push out HS NMEA (AIS), we do _not_ parse any of it
+      }
+      hsnmea_read_buffer = "";
+    }
+    else if (incoming_byte == '\r')
+    {
+      // don't do anything
+    }
+    else
+    {
+      hsnmea_read_buffer += String((char) incoming_byte);
+    }
+  }
+  if((int) hsnmea_read_buffer.length() >= MAX_NMEA_BUFFER - 1 )
+  {
+    hsnmea_read_buffer = "";
+  }
+}
 
-  Serial.print("Just sent: S=");
-  Serial.println(latest_message_to_send);
 
+
+
+bool try_and_send_encoded_message_to_esp8266()
+{
+  //
+  //  Somewhat perversly, we take our time here as we want to be sure
+  // nothing else is filling up the serial connection to the ESP (e.g.  NMEA
+  // data)
+  //
+
+  #ifdef SERIAL_DEBUG_ON
+  if(!esp8266IsReady())
+  {
+    debug_info(F("Waiting @ FHx"));
+  }
+  else
+  {
+    debug_info(F("Sailed @ FHx"));
+  }
+  #endif
+
+  //
+  //  Wait up to 10 full seconds for esp8266 to become ready (we almost
+  // never have to, but if it is off struggling with a DNS lookup or
+  // something, we _want_ to wait
+  // 
+
+  unsigned long time_stamp = millis();
+  while(!esp8266IsReady() && (millis() - time_stamp) < 10000UL)
+  {
+  }
+  
+  if(!esp8266IsReady())
+  {
+    return false;
+  }
+
+  
+  plain[0] = 'S';
+  plain[1] = '=';
+  if(Serial1.write(plain, 2) != 2)
+  {
+    return false;
+  }
+
+
+  for(i = 0; i < latest_message_to_send.length(); i = i + 32)
+  {
+    for(handy = 0; handy + i < latest_message_to_send.length() && handy < 32; handy++)
+    {
+      plain[handy] = (char) latest_message_to_send.charAt(i + handy);
+    } 
+    if(Serial1.write(plain, handy) != handy)
+    {
+      return false;
+    }
+    delay(10);
+  }
+
+  byte_zero = 0;
+  for(i = 0; i < latest_message_to_send.length(); i = i + 1)
+  {
+    byte_zero = byte_zero ^ latest_message_to_send.charAt(i);
+  }
+
+  String checksum = String(byte_zero, HEX); 
+  checksum.toUpperCase();
+  if(checksum.length() < 2)
+  {
+    
+    checksum =  String(F("@0")) + checksum + String(F("\r\n"));
+  }
+  else
+  {
+    checksum =  String(F("@")) + checksum + String(F("\r\n"));
+  }
+  if(Serial1.print(checksum) != 5)
+  {
+    return false;
+  }
+
+  return true;
+}
+
+
+void factoryReset()
+{
+
+  //
+  // Tell the esp to do a factory and then rewrite out own eeprom 
+  //
+
+  digitalWrite(GPS_LED_1, LOW);
+  digitalWrite(GPS_LED_2, LOW);
+  digitalWrite(COM_LED_1, LOW);
+  digitalWrite(COM_LED_2, LOW);
+
+  Serial1.println("factory");
+  init_eeprom_memory();
+  resetFunc();
+}
+
+
+
+void dualReboot()
+{
+  digitalWrite(GPS_LED_1, LOW);
+  digitalWrite(GPS_LED_2, LOW);
+  digitalWrite(COM_LED_1, LOW);
+  digitalWrite(COM_LED_2, LOW);
+  resetESP();
+  resetFunc();
+}
+
+
+
+void  send_encoded_message_to_esp8266()
+{
+  if(!try_and_send_encoded_message_to_esp8266())
+  {
+    send_message_failures++;
+    if(send_message_failures > MAX_SEND_MESSAGE_FAILURES)
+    {
+      dualReboot();
+    }
+  }
+  else
+  {
+    send_message_failures = 0;
+  }
 }
 
 
 void encode_latest_message_to_send()
 {
-  return;
   #ifdef BYPASS_AES_ON
     return;
   #endif
@@ -1943,11 +2244,11 @@ void encode_latest_message_to_send()
   
   base64_length = base64_encode( (char *) cipher, (char *) plain, cipher_length + 16);
   cipher[base64_length] = '\0';
-  latest_message_to_send = "$FHS:";
+  latest_message_to_send = F("$FHS:");
   latest_message_to_send += float_hub_id;
-  latest_message_to_send += ":";
+  latest_message_to_send += F(":");
   latest_message_to_send += FLOATHUB_ENCRYPT_VERSION;
-  latest_message_to_send += "$,";
+  latest_message_to_send += F("$,");
   for(i = 0; i < base64_length; i++)
   {
     latest_message_to_send += (char) cipher[i];
@@ -1989,7 +2290,6 @@ void zero_nmea_values()
     nmea_water_temperature = -1.0;
   }
 }
-
 
 void loop()
 {
@@ -2042,26 +2342,35 @@ void loop()
     update_nmea();
   }
   
+
+  if(current_timestamp - hsnmea_previous_timestamp > hsnmea_update_interval)
+  {
+    hsnmea_previous_timestamp = current_timestamp;
+    update_hsnmea();
+  }
+  
   /*
       Reporting routines
   */
   
-  if(currently_active == true)
+  if(currently_active == true && currently_connected)
   {
     if(current_timestamp - previous_active_timestamp >  active_reporting_interval)
     {
-      previous_active_timestamp = current_timestamp;
       report_state(false);
       zero_nmea_values();
+      previous_active_timestamp = current_timestamp;
+      previous_idle_timestamp = current_timestamp;
     }
   }
   else
   {
     if(current_timestamp - previous_idle_timestamp >  idle_reporting_interval)
     {
-      previous_idle_timestamp = current_timestamp;
       report_state(false);
       zero_nmea_values();
+      previous_active_timestamp = current_timestamp;
+      previous_idle_timestamp = current_timestamp;
     }
   }
   if(current_timestamp - previous_console_timestamp >  console_reporting_interval)
@@ -2074,10 +2383,38 @@ void loop()
     #endif
     pat_the_watchdog();	// Bump watchdog timer up to current time;
   }
-  
-  /*
-    Handle LED's to show communication state
-  */
+
+
+
+
+  //
+  //	Check on user reset button
+  //
+
+  if(digitalRead(USER_RESET_PIN) != user_reset_pin_state)
+  {
+    if(user_reset_pin_state == LOW)
+    {
+      user_reset_pin_timestamp = millis();
+    }
+    else
+    {
+      if(millis() - user_reset_pin_timestamp > USER_RESET_FACTORY_TIME) 
+      {
+        factoryReset();
+      }
+      else if(millis() - user_reset_pin_timestamp > USER_RESET_REBOOT_TIME) 
+      {
+        dualReboot();
+      }
+      user_reset_pin_timestamp = 0; 
+    }
+    user_reset_pin_state = digitalRead(USER_RESET_PIN);
+  }
+
+  //
+  // Handle LED's to show communication state
+  //
   
   if(current_timestamp - led_previous_timestamp > led_update_interval)
   {
