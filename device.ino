@@ -4,6 +4,15 @@
  (c) 2011-2016 Modiot Labs
  (begun June 6, 2011)
 
+
+  August, 2016
+
+  Tweaked Serial/NMEA issues. Note that the only tested and recommended
+  development environment is spec'd in the README.  Lot of the environment
+  modifications are related to serial/nmea/soft-serial timing issues and
+  things can go haywire without those recommended settings.
+
+
   May, 2016
 
   More responsibility over in the ESP8266 for most configuration values. 
@@ -121,6 +130,7 @@
 //#define BARO_DEBUG_ON	
 //#define ACTIVE_DEBUG_ON
 //#define SERIAL_DEBUG_ON
+//#define SOFTSERIAL_DEBUG_ON
 
 
 
@@ -1239,26 +1249,28 @@ void push_out_nmea_sentence(bool from_nmea_in)
     #ifdef SERIAL_DEBUG_ON
     debug_info(F("XB NMEA"));
     #endif
-    return;
+  }
+  else
+  {
+    if(from_nmea_in)
+    {  
+      Serial1.print(F("E="));
+      Serial1.println(nmea_read_buffer);
+    }
+    else
+    {
+      Serial1.print(F("E="));
+      Serial1.println(gps_read_buffer);
+    }
   }
 
   if(from_nmea_in)
   {
     Serial2.println(nmea_read_buffer);
-    Serial1.print(F("E="));
-    Serial1.println(nmea_read_buffer);
-    //Serial.println("Into flush C ...");
-    //Serial1.flush();
-    //Serial.println("Out of flush C");
   }
   else
   {
     Serial2.println(gps_read_buffer);
-    Serial1.print(F("E="));
-    Serial1.println(gps_read_buffer);
-    //Serial.println("Into flush D ...");
-    //Serial1.flush();
-    //Serial.println("Out of flush D");
   }
 }
 
@@ -1305,7 +1317,12 @@ bool validate_nmea_buffer(bool hsnmea = false)
 
   if(hsnmea)
   {
-    for(i = hsnmea_read_buffer.indexOf('!') + 1; i < hsnmea_read_buffer.lastIndexOf('*'); i++)
+    int start_point = hsnmea_read_buffer.indexOf('!');
+    if(start_point < 2)
+    {
+      start_point = hsnmea_read_buffer.indexOf('$');
+    }
+    for(i = start_point + 1; i < hsnmea_read_buffer.lastIndexOf('*'); i++)
     {
       byte_zero = byte_zero ^ hsnmea_read_buffer.charAt(i);
     }
@@ -1336,11 +1353,11 @@ bool validate_nmea_buffer(bool hsnmea = false)
   #ifdef NMEA_DEBUG_ON
   if(hsnmea)
   {
-    debug_info(String(F("Bad NMEA buffer: ")) + hsnmea_read_buffer);
+    debug_info(String(F("Bad NMEA buffer: ")) + hsnmea_read_buffer + ", Wanted: " + a_string);
   }
   else
   {
-    debug_info(String(F("Bad NMEA buffer: ")) + nmea_read_buffer);
+    debug_info(String(F("Bad NMEA buffer: ")) + nmea_read_buffer + ", Wanted: " + a_string);
   }
   #endif
   return false;  
@@ -2009,8 +2026,17 @@ void update_hsnmea()
     {
       if(validate_nmea_buffer(true))
       {
+        #ifdef SOFTSERIAL_DEBUG_ON
+        debug_info("SoftSer good: " + String(hsnmea_read_buffer));
+        #endif
         push_hsnmea_only_to_esp8266();   //   We just push out HS NMEA (AIS), we do _not_ parse any of it
       }
+      #ifdef SOFTSERIAL_DEBUG_ON
+      else
+      {
+        debug_info("SoftSer full: " + String(hsnmea_read_buffer));
+      }
+      #endif
       hsnmea_read_buffer = "";
     }
     else if (incoming_byte == '\r')
@@ -2024,6 +2050,10 @@ void update_hsnmea()
   }
   if((int) hsnmea_read_buffer.length() >= MAX_NMEA_BUFFER - 1 )
   {
+    #ifdef SOFTSERIAL_DEBUG_ON
+    debug_info("SoftSer toss: " + String(hsnmea_read_buffer));
+    #endif
+    
     hsnmea_read_buffer = "";
   }
 }
@@ -2038,6 +2068,8 @@ bool try_and_send_encoded_message_to_esp8266()
   // nothing else is filling up the serial connection to the ESP (e.g.  NMEA
   // data)
   //
+
+  Serial.println("Indeed here");
 
   #ifdef SERIAL_DEBUG_ON
   if(!esp8266IsReady())

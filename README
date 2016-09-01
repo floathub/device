@@ -7,3 +7,36 @@ more information.
 
 Note that the esp8266 directory contains separate code that is to be flashed
 to the onboard esp8266.
+
+
+The ONLY TESTED AND RECOMMENDED build environment for this code is Arduino
+1.6.7 with the following serial buffer modifications:
+
+  HardwareSerial.h
+
+in
+
+  hardware/arduino/avr/cores/arduino/HardwareSerial.h
+
+should have the TX and RX buffers changed from 64 bytes to 256 like so:
+
+  //#define SERIAL_TX_BUFFER_SIZE 64
+  #define SERIAL_TX_BUFFER_SIZE 256
+  ...
+  //#define SERIAL_RX_BUFFER_SIZE 64
+  #define SERIAL_RX_BUFFER_SIZE 256
+
+Similarly, the Software Serial library should be modified:
+
+  SoftwareSerial.h
+
+in
+
+  hardware/arduino/avr/libraries/SoftwareSerial/    
+
+should have the RX buffer changed from 64 bytes to 128 bytes as in:
+
+  //#define _SS_MAX_RX_BUFF 64 // RX buffer size
+  #define _SS_MAX_RX_BUFF 128 // RX buffer size
+
+
