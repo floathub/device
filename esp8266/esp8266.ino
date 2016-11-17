@@ -56,10 +56,10 @@ extern "C" {
 //#define HTTP_DEBUG_ON
 //#define MDNS_DEBUG_ON
 //#define STAT_DEBUG_ON
-#define INPT_DEBUG_ON
-#define WIFI_DEBUG_ON
-#define FILE_DEBUG_ON
-#define FILE_SERVE_ON	// Useful when debuggig to see SPIFF files from a browser
+//#define INPT_DEBUG_ON
+//#define WIFI_DEBUG_ON
+//#define FILE_DEBUG_ON
+//#define FILE_SERVE_ON	// Useful when debuggig to see SPIFF files from a browser
 
 //
 //  Global defines
@@ -90,7 +90,7 @@ IPAddress public_static_dns;
 
 //	Account Related 
 
-String        float_hub_id;			// default: factory0
+String        float_hub_id;			// default: factoryX
 byte          float_hub_aes_key[16]; 
 
 //	Other Settings
@@ -114,7 +114,7 @@ unsigned long boot_counter;
 
 
 //
-//	Othe global stuff
+//	Other global stuff
 //
 
 #define MAX_LATEST_MESSAGE_SIZE 512
@@ -140,7 +140,7 @@ long unsigned int high_file_pointer;
 int  serial_ready_pin = 5;
 
 //
-//	Struct to hold out authentication cookies
+//	Struct to hold our authentication cookies
 //
 
 struct COOKIES
@@ -158,8 +158,13 @@ struct COOKIES
 COOKIES cookies[MAX_COOKIES];
 
 
+//
+//	Timing for all the various activitues 
+//
+
 
 unsigned long house_keeping_interval     	   = 3000;  // Do house keeping every 3 seconds
+unsigned long wifi_housekeeping_interval     	   = 60000; // Do wifi house keeping every minute 
 unsigned long nmea_housekeeping_interval 	   = 1000;  // Check on nmea connections every second	
 unsigned long virtual_serial_housekeeping_interval = 500;   // Check on virtual serial connections every 1/2 second
 unsigned long console_read_interval		   = 10;    // Check on "console" (mostly stuff from main board) every 1/100th of a second
@@ -167,8 +172,10 @@ unsigned long fdr_communications_interval	   = 100;   // Check on status of push
 unsigned long heartbeat_interval		   = 1000;  // Once a second, send heartbeat update 
 unsigned long network_interval			   = 200;   // Every 1/5th of a second, look at web requests/etc
 int           heartbeat_cycle			   = 0;     // Which heartbeat value to send
+int	      wifi_housekeeping_cycle_counter	   = 0;     // Cycle counter for WiFi house keeping
 
 unsigned long house_keeping_previous_timestamp = 0;
+unsigned long wifi_housekeeping_previous_timestamp = 0;
 unsigned long nmea_housekeeping_previous_timestamp = 0;
 unsigned long virtual_serial_housekeeping_previous_timestamp = 0;
 unsigned long console_previous_timestamp = 0; 
@@ -183,7 +190,6 @@ unsigned long network_previous_timestamp = 0;
 
 
 ESP8266WebServer  web_server ( 80 );
-DNSServer	  dns_server;
 WiFiServer       *nmea_server = 0;
 WiFiClient        nmea_client[4];
 WiFiServer	 *virtual_serial_server = 0;
@@ -207,7 +213,7 @@ String	virtual_serial_read_buffer;
 //
 
 unsigned watchdog_timestamp;
-#define  WATCHDOG_TIME_LIMIT 3600000UL	// If we do not manage to get and data through to FDR after 1 hour, reboot the whole shebang 
+#define  WATCHDOG_TIME_LIMIT 3600000UL	// If we do not manage to get any data through to FDR after 1 hour, reboot the whole shebang 
 
 
 void help_info(String some_info)
@@ -345,9 +351,6 @@ void readStringFromEEPROM(int location, String &the_string, unsigned int max_len
     the_string += next_char;
   }
 }
-
-
-
 
 void init_eeprom_memory()
 {
@@ -634,7 +637,6 @@ void write_eeprom_memory()
 
   EEPROM.commit();
 
-  
 }
 
 
@@ -750,11 +752,6 @@ void read_eeprom_memory()
   
 }  
 
-
-
-
-
-
 bool isAuthenticated()
 {
   if (web_server.hasHeader("Cookie"))
@@ -796,6 +793,7 @@ bool isAuthenticated()
   return false;	
 }
 
+
 bool isOnPrivateNetwork()
 {
   WiFiClient client = web_server.client();
@@ -806,6 +804,7 @@ bool isOnPrivateNetwork()
   }
   return false;
 }
+
 
 void nukeNmeaServer()
 {
@@ -825,6 +824,7 @@ void nukeNmeaServer()
   }
 
 }
+
 
 void fireUpNmeaServer()
 {
@@ -855,6 +855,7 @@ void kickNMEA()
   }
 }
 
+
 void nukeVirtualSerialServer()
 {
 
@@ -871,6 +872,7 @@ void nukeVirtualSerialServer()
 
 }
 
+
 void fireUpVirtualSerialServer()
 {
 
@@ -880,6 +882,7 @@ void fireUpVirtualSerialServer()
   virtual_serial_server->setNoDelay(true);
 
 }
+
 
 void kickVirtualSerial()
 {
@@ -920,7 +923,6 @@ void checkPort(unsigned int &the_port)
 
 void sendPleaseWait(String where_to_go)
 {
-
   String page = FPSTR(HTTP_INITA);
   page += "<meta http-equiv='refresh' content='8; " + where_to_go + "'>";
   page += FPSTR(HTTP_TITLE);
@@ -933,13 +935,11 @@ void sendPleaseWait(String where_to_go)
   page += FPSTR(HTTP_CLOSE);
 
   web_server.send ( 200, "text/html", page );
-
-
 }
+
 
 void handleLogin()
 {
-
   #ifdef HTTP_DEBUG_ON
   debug_info(F("Enter handleLogin()"));
   #endif
@@ -1043,10 +1043,7 @@ void handleReboot()
 
   delay(200);
   ESP.restart();  
-
 }
-
-
 
 
 void handleRoot()
@@ -1109,6 +1106,7 @@ void handleRoot()
 
   web_server.send ( 200, "text/html", page );
 }
+
 
 void handlePrivateWireless()
 {
@@ -1187,14 +1185,21 @@ void handlePrivateWireless()
 }
 
 
-void kickMDNS()
+void kickMDNS(bool ap_side = false)
 {
   int attempts = 0;
+
+  IPAddress which_address = WiFi.localIP();
+  if(ap_side)
+  {
+    which_address = WiFi.softAPIP();
+  }
+
   #ifdef MDNS_DEBUG_ON
-  debug_info("MDNS binding " + mdns_name + " --> " + WiFi.localIP().toString());
+  debug_info("MDNS binding " + mdns_name + " --> " + which_address.toString());
   #endif
 
-  while((!MDNS.begin (mdns_name.c_str(), WiFi.localIP())) && attempts < 12)
+  while((!MDNS.begin (mdns_name.c_str(), which_address)) && attempts < 12)
   {
     #ifdef MDNS_DEBUG_ON
     debug_info("MDNS died off ... will retry");
@@ -1211,23 +1216,28 @@ void kickMDNS()
   }
 }
 
-void kickWiFi()
+
+void kickWiFi(bool ap_only=false)
 {
-  #ifdef WIFI_DEBUG_ON
-  debug_info(F("Kicking the WiFi"));
-  #endif
   WiFi.disconnect();
   WiFi.mode(WIFI_OFF);
+  delay(500);
 
-  if(public_wifi_ssid == "factoryX")
+  if(public_wifi_ssid == "factoryX" || ap_only == true)
   {
+    #ifdef WIFI_DEBUG_ON
+    debug_info(F("Kicking AP WiFi"));
+    #endif
     WiFi.setAutoConnect(false);
     WiFi.mode(WIFI_AP);
     WiFi.softAP(private_wifi_ssid.c_str(), private_wifi_password.c_str());
+    kickMDNS(true);
   }
   else
   {
-
+    #ifdef WIFI_DEBUG_ON
+    debug_info(F("Kicking Full WiFi"));
+    #endif
     WiFi.setAutoConnect(true);
     WiFi.mode(WIFI_AP_STA);
     WiFi.begin(public_wifi_ssid.c_str(), public_wifi_password.c_str());
@@ -1375,8 +1385,6 @@ void handlePublicWireless()
   // Now build the page to send
   //
 
-
-
   String page = FPSTR(HTTP_INITA);
   page += FPSTR(HTTP_TITLE);
   page += FPSTR(HTTP_STYLE);
@@ -1445,6 +1453,7 @@ void handlePublicWireless()
 
   web_server.send ( 200, "text/html", page );
 }
+
 
 void handleOther()
 {
@@ -1584,11 +1593,8 @@ void handleOther()
   }
   page += "><br>";
 
-
   page += "<button type='submit' name='savebutton' value='True'>Save</button>";
   page += "</form></div><br>";
-
-
 
   page += FPSTR(HTTP_HOMEB);
   if(nmea_changed)
@@ -1602,7 +1608,6 @@ void handleOther()
 
 void handleAdvanced()
 {
-
   //
   // No obvious way to arrive at this page so it is "secret", but note that
   // user must still first be authenticated like any other page.
@@ -1708,8 +1713,6 @@ void handleAdvanced()
   page += "<input type='number' name='vsport' length='5' maxlength='5' value='" + String(virtual_serial_port) + "' ><br>";
   page += "<button type='submit' name='savebutton' value='True'>Save</button>";
   page += "</form></div><br>";
-
-
 
   page += FPSTR(HTTP_HOMEB);
   if(virtual_serial_changed)
@@ -1859,17 +1862,20 @@ void handleAccount()
 
 }
 
+
 void handleLogo()
 {
   web_server.sendHeader(F("Cache-Control"), F("max-age=3600"));
   web_server.send_P(200, "image/png", FLOATHUB_LOGO, sizeof(FLOATHUB_LOGO) );
 }
 
+
 void handleFavicon()
 {
   web_server.sendHeader(F("Cache-Control"), F("max-age=3600"));
   web_server.send_P(200, "image/ico", FLOATHUB_FAVICON, sizeof(FLOATHUB_FAVICON) );
 }
+
 
 #ifdef FILE_SERVE_ON
 void handleFile()
@@ -1918,15 +1924,18 @@ void handleFile()
 }
 #endif
 
+
 void signalBusy()
 {
   digitalWrite(serial_ready_pin, LOW);
 }
 
+
 void signalIdle()
 {
   digitalWrite(serial_ready_pin, HIGH);
 }
+
 
 void displayCurrentVariables()
 {
@@ -2030,6 +2039,7 @@ void showFileList(bool actually_show = true)
   }
 }
 
+
 bool nukeOldestFile()
 {
   if(!SPIFFS.remove("/" + String(low_file_pointer)))
@@ -2042,6 +2052,7 @@ bool nukeOldestFile()
   low_file_pointer += 1; 
   return true;
 }
+
 
 bool initFileSystem()
 {
@@ -2137,10 +2148,6 @@ void popMessageQueue()
 }
 
 
-
-
-
-
 void setupFileSystem()
 {
   SPIFFS.begin();
@@ -2163,6 +2170,7 @@ void setupFileSystem()
 
   showFileList();
 }
+
 
 void setup(void)
 {
@@ -2233,7 +2241,7 @@ void setup(void)
   // Fire up the WiFi
   //
 
-  kickWiFi();
+  kickWiFi(true);
 
   //
   // Bring up the web server
@@ -2268,15 +2276,6 @@ void setup(void)
 
 
   //
-  // Answer to e on the Private WiFi side
-  //
-
-  // dns_server.setErrorReplyCode(DNSReplyCode::NoError);
-  //dns_server.start(53, "floathub.local", WiFi.softAPIP());
-  //dns_server.start(53, "*", WiFi.softAPIP());
-
-
-  //
   // Bring up nmea_server if need be
   //
 
@@ -2305,6 +2304,7 @@ void setup(void)
   watchdog_timestamp = millis();
 }
 
+
 void echoNMEA(String a_message)
 {
   if(nmea_mux_on)
@@ -2318,6 +2318,7 @@ void echoNMEA(String a_message)
     }
   }
 }
+
 
 void pushMessageQueue(String a_message)
 {
@@ -2341,6 +2342,8 @@ void pushMessageQueue(String a_message)
       debug_info(F("Enough free: "), (int) space_left);
       debug_info(F("      Total: "), (int) fs_info.totalBytes);
       debug_info(F("       Used: "), (int) fs_info.usedBytes);
+      debug_info(F("        LFP: "), (int) low_file_pointer);
+      debug_info(F("        HFP: "), (int) high_file_pointer);
       #endif
       
     }
@@ -2348,6 +2351,8 @@ void pushMessageQueue(String a_message)
     {
       #ifdef FILE_DEBUG_ON
       debug_info(F("Not enough free: "), (int) space_left);
+      debug_info(F("            LFP: "), (int) low_file_pointer);
+      debug_info(F("            HFP: "), (int) high_file_pointer);
       #endif
       while(space_left <= MIN_SPIFF_SPACE)
       {
@@ -2430,6 +2435,7 @@ void pushMessageQueue(String a_message)
   }
 }
 
+
 void queueMessage(String a_message)
 {
   //
@@ -2486,6 +2492,7 @@ void queueMessage(String a_message)
   }
 }
 
+
 void nmeaHouseKeeping()
 {
 
@@ -2528,11 +2535,6 @@ void nmeaHouseKeeping()
     nmea_client[i] = nmea_server->available();
   }
 
-  //
-  //  Temp testing
-  //
-
-  //echoNMEA("McLovin");
 }
 
 
@@ -2555,6 +2557,7 @@ void processNewPortValue(String preamble, unsigned int &the_port, int new_value)
   help_info(preamble + the_port);
 }
 
+
 void processNewFlagValue(String preamble, bool &the_flag, int new_value)
 {
   the_flag = new_value;
@@ -2562,13 +2565,13 @@ void processNewFlagValue(String preamble, bool &the_flag, int new_value)
   help_info(preamble + the_flag);
 }
 
+
 void processNewIPAddress(String preamble, IPAddress &the_address, IPAddress new_address)
 {
   the_address = new_address;
   write_eeprom_memory();
   help_info(preamble + the_address.toString());
 }
-
 
 
 void parseInput(String &the_input)
@@ -3134,12 +3137,12 @@ void virtualSerialHouseKeeping()
   }
 }
 
+
 bool openFdr()
 {
 
 
-  // Open a connection to the floathub server (usually fdr.floathub.net)
-
+  // Open a connection to the FloatHub Data Receiver server (usually fdr.floathub.net)
 
   #ifdef WIFI_DEBUG_ON
   debug_info(F("Opening fdr socket ..."));
@@ -3222,8 +3225,62 @@ void houseKeeping()
   }
 }
 
+
+void WiFiHouseKeeping()
+{
+  #ifdef WIFI_DEBUG_ON
+  debug_info("WiFi House Keeping ", wifi_housekeeping_cycle_counter);
+  #endif
+
+  //
+  //  If we have public WiFi link, then we don't need to do anything
+  //
+  if(WiFi.status() == WL_CONNECTED)
+  {
+    return;
+  }
+
+  //
+  // OK, we are _not_ connected. Once every ten cycles through here, try to
+  // connect if the public wifi is set to anything other than factory
+  // default
+  //
+
+  wifi_housekeeping_cycle_counter++;
+  if(wifi_housekeeping_cycle_counter > 9)
+  {
+    wifi_housekeeping_cycle_counter = 0;
+  }
+
+  if(public_wifi_ssid == "factoryX")
+  {
+    return;
+  }
+
+  if(wifi_housekeeping_cycle_counter == 8 )
+  {
+    #ifdef WIFI_DEBUG_ON
+    debug_info("WiFi HouseK: Trying Public");
+    #endif
+
+    kickWiFi();
+  }
+  else if (wifi_housekeeping_cycle_counter == 9)
+  {
+    #ifdef WIFI_DEBUG_ON
+    debug_info("WiFi HouseK: Killing Public");
+    #endif
+    kickWiFi(true);
+  }
+}
+
+
 void heartbeatHouseKeeping()
 {
+  #ifdef WIFI_DEBUG_ON
+  debug_info(String("AP IP: ") + WiFi.softAPIP().toString());
+  #endif
+
   if(heartbeat_cycle == 0)
   {
     internal_info(String(F("i=")) + float_hub_id); 
@@ -3256,6 +3313,7 @@ void heartbeatHouseKeeping()
     heartbeat_cycle = 0;
   }
 }
+
 
 void fdrHouseKeeping()
 {
@@ -3399,11 +3457,9 @@ void fdrHouseKeeping()
 
 void readConsole()
 {
-  
 
   signalIdle();
   unsigned long right_right_now = millis();
-
 
   //
   //  Signal we are available, then wait up to 2 full seconds for data to come
@@ -3432,7 +3488,6 @@ void readConsole()
     } 
   }
 
-
   if((int) console_read_buffer.length() >= MAX_CONSOLE_BUFFER - 1 )
   {
     #ifdef INPT_DEBUG_ON
@@ -3448,13 +3503,12 @@ void readConsole()
 
 void loop(void)
 {
-  /*
-      Obviously this is main execution loop. There are a number of values we read and actions we take base on timing
-  */
+  //
+  //  Obviously this is main execution loop. There are a number of values we read and actions we take base on timing
+  //
    
   unsigned long current_timestamp = millis();
  
-
   if(current_timestamp - heartbeat_previous_timestamp >  heartbeat_interval)
   {
     heartbeat_previous_timestamp = current_timestamp;
@@ -3470,33 +3524,30 @@ void loop(void)
     console_previous_timestamp = current_timestamp;
     readConsole();
   }
-
   if(current_timestamp - house_keeping_previous_timestamp >  house_keeping_interval)
   {
     house_keeping_previous_timestamp = current_timestamp;
     houseKeeping();
   }
- 
+  if(current_timestamp - wifi_housekeeping_previous_timestamp >  wifi_housekeeping_interval)
+  {
+    wifi_housekeeping_previous_timestamp = current_timestamp;
+    WiFiHouseKeeping();
+  }
   if(current_timestamp - nmea_housekeeping_previous_timestamp > nmea_housekeeping_interval)
   {
     nmea_housekeeping_previous_timestamp = current_timestamp;
     nmeaHouseKeeping();
-
   } 
-
   if(current_timestamp - virtual_serial_housekeeping_previous_timestamp > virtual_serial_housekeeping_interval)
   {
     virtual_serial_housekeeping_previous_timestamp = current_timestamp;
     virtualSerialHouseKeeping();
   } 
-
-
   if(current_timestamp - network_previous_timestamp > network_interval)
   {
-    dns_server.processNextRequest();
     web_server.handleClient();
   }
-  
 }
 
 

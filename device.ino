@@ -298,7 +298,7 @@ unsigned long  gps_utc_unix = 0;
 String         gps_latitude = "";
 String         gps_longitude = "";
 String         gps_sog = "";          //  Speed over ground
-String         gps_bearing_true ="";  //  Not magnetic!
+String         gps_bearing_true = ""; //  Not magnetic!
 String         gps_siv = "";          //  Number of satellites in view
 String         gps_hdp = "";          //  Horizontal dillution of precision (how good is our fix)
 String         gps_altitude = "";     //  We should be able to build a tide table out of this.
@@ -792,9 +792,6 @@ void add_checksum_and_send_nmea_string(String nmea_string)
   {
     Serial1.print(F("E="));
     Serial1.println(nmea_string);
-    //Serial.println("Into flush A ...");
-    //Serial1.flush();
-    //Serial.println("Out of flush A");
   }
   #ifdef SERIAL_DEBUG_ON
   else
@@ -836,12 +833,12 @@ void bmp_read()
     float closest = abs(temperature_history[BARO_HISTORY_LENGTH - 1] - average);
     temperature = temperature_history[BARO_HISTORY_LENGTH - 1];
     #ifdef BARO_DEBUG_ON
-    debug_info(F("Temperature ") + String(BARO_HISTORY_LENGTH) + F(": "), temperature_history[BARO_HISTORY_LENGTH - 1]);
+    debug_info(String(F("Temperature ")) + String(BARO_HISTORY_LENGTH) + String(F(": ")), temperature_history[BARO_HISTORY_LENGTH - 1]);
     #endif
     for(int_one = BARO_HISTORY_LENGTH - 2; int_one >= 0; int_one--)
     {
       #ifdef BARO_DEBUG_ON
-      debug_info(F("Temperature ") + String(int_one) + F(": "), temperature_history[int_one]);
+      debug_info(String(F("Temperature ")) + String(int_one) + String(F(": ")), temperature_history[int_one]);
       #endif
       if(abs(temperature_history[int_one] - average) < closest)
       {
@@ -874,12 +871,12 @@ void bmp_read()
     float closest = abs(pressure_history[BARO_HISTORY_LENGTH - 1] - average);
     pressure = pressure_history[BARO_HISTORY_LENGTH - 1];
     #ifdef BARO_DEBUG_ON
-    debug_info(F("Pressure ") + String(BARO_HISTORY_LENGTH) + F(": "), pressure_history[BARO_HISTORY_LENGTH - 1]);
+    debug_info(String(F("Pressure ")) + String(BARO_HISTORY_LENGTH) + String(F(": ")), pressure_history[BARO_HISTORY_LENGTH - 1]);
     #endif
     for(int_one = BARO_HISTORY_LENGTH - 2; int_one >= 0; int_one--)
     {
       #ifdef BARO_DEBUG_ON
-      debug_info(F("Pressure ") + String(int_one) + F(": "), pressure_history[int_one]);
+      debug_info(String(F("Pressure ")) + String(int_one) + String(F(": ")), pressure_history[int_one]);
       #endif
       if(abs(pressure_history[int_one] - average) < closest)
       {
@@ -941,11 +938,12 @@ void bmp_read()
   //
   //
   
+
   if(nmea_cycle == 0)
   {
-    a_string = F("$WIMTA,");
-    append_float_to_string(a_string, temperature);
-    a_string += F(",F*");
+    a_string = String(F("$IIMTA,")) 
+             + String(temperature,2) 
+             + String(F(",F*"));
 
     add_checksum_and_send_nmea_string(a_string);
   }
@@ -959,13 +957,13 @@ void bmp_read()
 
   else if(nmea_cycle == 1)
   {
-    a_string = F("$WIMDA,");
-    append_float_to_string(a_string, pressure);
-    a_string += F(",I,");
-    append_float_to_string(a_string, pressure * 0.03386388158);
-    a_string += F(",B,");
-    append_float_to_string(a_string, (temperature - 32.0) * (5.0 / 9.0));
-    a_string += F(",C,,,,,,,,,,,,,,*");
+    a_string = String(F("$IIMDA,")) 
+             + String(pressure,3)
+             + String(F(",I,"))
+             + String(pressure * 0.03386388158, 6)
+    	     + String(F(",B,"))
+             + String((temperature - 32.0) * (5.0 / 9.0),2)
+             + String(F(",C,,,,,,,,,,,,,,*"));
 
 
     add_checksum_and_send_nmea_string(a_string);   
@@ -977,11 +975,11 @@ void bmp_read()
 
   else if(nmea_cycle == 2)
   {
-    a_string = F("$WIMMB,");
-    append_float_to_string(a_string, pressure);
-    a_string += F(",I,");
-    append_float_to_string(a_string, pressure * 0.03386388158);
-    a_string += F(",B*");
+    a_string = String(F("$IIMMB,"))
+             + String(pressure,3)
+             + String(F(",I,"))
+             + String(pressure * 0.03386388158, 6)
+             + String(F(",B*"));
 
     add_checksum_and_send_nmea_string(a_string);  
   }
@@ -992,11 +990,11 @@ void bmp_read()
 
   else if(nmea_cycle == 3)
   {
-    a_string = F("$WIXDR,C,");
-    append_float_to_string(a_string, (temperature - 32.0) * (5.0 / 9.0));
-    a_string += F(",C,FHUB_TEMP,P,");
-    append_float_to_string(a_string, pressure * 0.03386388158);
-    a_string += F(",B,FHUB_BARO*");
+    a_string = String(F("$IIXDR,C,"))
+             + String((temperature - 32.0) * (5.0 / 9.0), 2)
+             + String(F(",C,TempAir,P,"))
+             + String(pressure * 0.03386388158, 6)
+             + String(F(",B,Barometric*"));
 
     add_checksum_and_send_nmea_string(a_string);  
   }
@@ -1006,6 +1004,7 @@ void bmp_read()
   {
     nmea_cycle = 0;
   }
+
 }
 
 
@@ -1235,9 +1234,6 @@ void push_hsnmea_only_to_esp8266()
   }
   Serial1.print(F("E="));
   Serial1.println(hsnmea_read_buffer);
-  //Serial.println("Into flush B ...");
-  //Serial1.flush();
-  //Serial.println("Out of flush B");
 }
 
 
@@ -1382,6 +1378,7 @@ void gps_read()
           #endif
           push_out_nmea_sentence(false);
           parse_gps_buffer_as_rmc();
+
         }
         else if(gps_read_buffer.indexOf(F("$GPGGA,")) == 0)
         {
@@ -2068,8 +2065,6 @@ bool try_and_send_encoded_message_to_esp8266()
   // nothing else is filling up the serial connection to the ESP (e.g.  NMEA
   // data)
   //
-
-  Serial.println("Indeed here");
 
   #ifdef SERIAL_DEBUG_ON
   if(!esp8266IsReady())
