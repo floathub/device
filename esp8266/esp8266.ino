@@ -56,9 +56,9 @@ extern "C" {
 //#define HTTP_DEBUG_ON
 //#define MDNS_DEBUG_ON
 //#define STAT_DEBUG_ON
-//#define INPT_DEBUG_ON
-//#define WIFI_DEBUG_ON
-//#define FILE_DEBUG_ON
+#define INPT_DEBUG_ON
+#define WIFI_DEBUG_ON
+#define FILE_DEBUG_ON
 //#define FILE_SERVE_ON	// Useful when debuggig to see SPIFF files from a browser
 
 //
@@ -1987,6 +1987,9 @@ void displayCurrentVariables()
   help_info(String(F("Z=")) + virtual_serial_on); 
   help_info(String(F("z=")) + virtual_serial_port); 
 
+  help_info(String(F("AP-IP: ")) + WiFi.softAPIP().toString()); 
+  help_info(String(F("WiFi-IP: ")) + WiFi.localIP().toString()); 
+
 }
 
 
@@ -3277,10 +3280,6 @@ void WiFiHouseKeeping()
 
 void heartbeatHouseKeeping()
 {
-  #ifdef WIFI_DEBUG_ON
-  debug_info(String("AP IP: ") + WiFi.softAPIP().toString());
-  #endif
-
   if(heartbeat_cycle == 0)
   {
     internal_info(String(F("i=")) + float_hub_id); 
@@ -3327,11 +3326,13 @@ void fdrHouseKeeping()
     }
 
     //
-    //	We are appear to be connected to something. If there's a message to send, we should do so
+    //	We are appear to be connected to something. If there's a message to
+    // send AND we are not in silent mode (i.e.  if phone_home_on false?),
+    // we should send message
     //	
 
     unsigned long current_timestamp = millis();
-    if(current_communication_state == idle)
+    if(current_communication_state == idle && phone_home_on == true)	
     {
       if(latest_message_to_send.length() > 0)
       {
