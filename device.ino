@@ -123,14 +123,14 @@
 //#define GPS_DEBUG_ON
 //#define PUMP_DEBUG_ON
 //#define EXECUTION_PATH_DEBUG_ON
-#define NMEA_DEBUG_ON
+//#define NMEA_DEBUG_ON
 //#define DEBUG_MEMORY_ON
 //#define STRESS_MEMORY_ON
 //#define BYPASS_AES_ON
 //#define BARO_DEBUG_ON	
 //#define ACTIVE_DEBUG_ON
 //#define SERIAL_DEBUG_ON
-#define SOFTSERIAL_DEBUG_ON
+//#define SOFTSERIAL_DEBUG_ON
 
 
 
