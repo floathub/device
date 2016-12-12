@@ -1128,7 +1128,6 @@ void parse_gps_buffer_as_rmc()
     gps_sog.substring(0,gps_sog.length()).toCharArray(temp_string, 19);
     float_one = atof(temp_string);
   
-    //if(float_one > 0.0)  //  Always active for debugging
     if(float_one > 0.25)  //  Moving faster than a 1/4 knot?
     {
       #ifdef ACTIVE_DEBUG_ON
