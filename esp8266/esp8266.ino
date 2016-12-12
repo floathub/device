@@ -25,7 +25,7 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
 #include <ESP8266mDNS.h>
-#include <DNSServer.h>
+//	#include <DNSServer.h>
 #include <EEPROM.h>
 #include <FS.h>
 #include "static.h"
@@ -2602,6 +2602,14 @@ void parseInput(String &the_input)
     debug_info(F("Bad FHx"));
   }
   #endif
+
+  else if(the_input.startsWith("B=")) // Just a debugging message, push it out virtual terminal if there is one 
+  {
+    if(virtual_serial_on && virtual_serial_client && virtual_serial_client.connected())
+    {
+      virtual_serial_client.println(the_input.substring(2));
+    }
+  }
 
   else if(the_input.startsWith("factory"))
   {

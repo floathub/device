@@ -128,7 +128,7 @@
 //#define STRESS_MEMORY_ON
 //#define BYPASS_AES_ON
 //#define BARO_DEBUG_ON	
-//#define ACTIVE_DEBUG_ON
+#define ACTIVE_DEBUG_ON
 //#define SERIAL_DEBUG_ON
 //#define SOFTSERIAL_DEBUG_ON
 
@@ -214,8 +214,8 @@ unsigned long gps_interval = 50;                  	//  Read GPS serial
 unsigned long voltage_interval = 5000;            	//  Check batteries/chargers every 5 second
 unsigned long pump_interval = 1200;               	//  Check pump state every 1.2 seconds
 unsigned long active_reporting_interval = 30000;  	//  When in use, report data every 30 seconds
-unsigned long idle_reporting_interval = 10000;   	  
-//unsigned long idle_reporting_interval = 600000;   	//  When idle, report data every 10 minutes
+//unsigned long idle_reporting_interval = 10000;   	//  Stress testing during dvelopment
+unsigned long idle_reporting_interval = 600000;   	//  When idle, report data every 10 minutes
 unsigned long console_reporting_interval = 5000;  	//  Report to USB console every 5 seconds  
 unsigned long console_interval = 250;             	//  Check console for input every 250 milliseconds
 unsigned long esp8266_interval = 100;			//  Check for input from esp8266 on Serial 1  
@@ -1778,6 +1778,7 @@ void debug_info_core(String some_info)
 {
   some_info.replace('\n','|');
   some_info.replace('\r','|');
+
   Serial.print(F("$FHD:"));
   Serial.print(float_hub_id);
   Serial.print(F(":"));
@@ -1785,18 +1786,29 @@ void debug_info_core(String some_info)
   Serial.print(F("$    "));
   Serial.print(String(F("[")) + String(hour()) + F(":") + String(minute()) + F(":") + String(second()) + F("] "));
   Serial.print(some_info);
+
+  Serial1.print(F("B=$FHD:"));
+  Serial1.print(float_hub_id);
+  Serial1.print(F(":"));
+  Serial1.print(FLOATHUB_PROTOCOL_VERSION);
+  Serial1.print(F("$    "));
+  Serial1.print(String(F("[")) + String(hour()) + F(":") + String(minute()) + F(":") + String(second()) + F("] "));
+  Serial1.print(some_info);
+
 }
 
 void debug_info(String some_info)
 {
   debug_info_core(some_info);
   Serial.println();
+  Serial1.println();
 }
 
 void debug_info(String some_info, float x)
 {
   debug_info_core(some_info);
   Serial.println(x);
+  Serial1.println(x);
 }
 
 
@@ -1804,6 +1816,7 @@ void debug_info(String some_info, int x)
 {
   debug_info_core(some_info);
   Serial.println(x);
+  Serial1.println(x);
 }
 
 void update_leds()
