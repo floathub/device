@@ -1,8 +1,14 @@
 /*
 
  FloatHub Arduino Code
- (c) 2011-2016 Modiot Labs
+ (c) 2011-2017 Modiot Labs
  (begun June 6, 2011)
+
+
+  December, 2016
+
+  Final tweaking to a 1.0 release, lot of fine tuning fiddly bits with WiFi
+  Public/Private dropping, reconnecting, etc.
 
 
   August, 2016
@@ -73,7 +79,7 @@
   into other incoming NMEA (on NMEA in).
  
  
-   May 2013
+  May 2013
   
   Added NMEA input to the mix, so basic feature complete with NMEA,
   encryption, etc.  Added protocol/encryption version info to the protocol
@@ -86,7 +92,7 @@
   trunk. It encrypts content using aes-128-cbc encryption
 
  
- March, 2013
+  March, 2013
 
   Moved to a proper text-based build environment and versioning system on
   git-hub.
@@ -128,10 +134,9 @@
 //#define STRESS_MEMORY_ON
 //#define BYPASS_AES_ON
 //#define BARO_DEBUG_ON	
-#define ACTIVE_DEBUG_ON
+//#define ACTIVE_DEBUG_ON
 //#define SERIAL_DEBUG_ON
 //#define SOFTSERIAL_DEBUG_ON
-
 
 
 /*
@@ -141,6 +146,7 @@
 */
 
 #include "./esp8266/version_defines.h"
+
 
 /*
   Some AES variables
@@ -158,7 +164,7 @@ byte cipher[MAX_AES_CIPHER_LENGTH];
   Various communication and account settings/data
 */
 
-String          float_hub_id;			// default: outofbox
+String          float_hub_id;			// default: factoryX
 byte            float_hub_aes_key[16]; 
 bool	        currently_connected = false;
 unsigned long   boot_counter;			
@@ -173,6 +179,7 @@ unsigned long	user_reset_pin_timestamp = 0;	//  Last time the user rest pin was 
 int		send_message_failures = 0;	//  Number of times we can fail to send something to ESP8266 before we dual reboot
 #define		MAX_SEND_MESSAGE_FAILURES 5
 
+
 /*
   Status LED's
 */
@@ -183,10 +190,10 @@ int		send_message_failures = 0;	//  Number of times we can fail to send somethin
 #define GPS_LED_1   8
 #define GPS_LED_2   9
 
+
 /*
    Some global Strings, character arrays
 */
-
 
 #define MAX_LATEST_MESSAGE_SIZE 512
 #define MAX_NEW_MESSAGE_SIZE 256 
@@ -194,6 +201,7 @@ String latest_message_to_send = "";
 String new_message = "";
 String a_string = "";
 char   temp_string[20];  
+
 
 /*
   Handy variables to use at various stages (better to be global, less memory)
@@ -210,17 +218,17 @@ unsigned int i;
 */
 
 unsigned long sensor_sample_interval = 10000;     	//  Check temperature, pressure, every 10 seconds
-unsigned long gps_interval = 50;                  	//  Read GPS serial 
+unsigned long gps_interval = 50;                  	//  Read GPS serial every 1/20 of a second
 unsigned long voltage_interval = 5000;            	//  Check batteries/chargers every 5 second
 unsigned long pump_interval = 1200;               	//  Check pump state every 1.2 seconds
 unsigned long active_reporting_interval = 30000;  	//  When in use, report data every 30 seconds
-//unsigned long idle_reporting_interval = 10000;   	//  Stress testing during dvelopment
+//unsigned long idle_reporting_interval = 10000;   	//  Stress testing during development
 unsigned long idle_reporting_interval = 600000;   	//  When idle, report data every 10 minutes
 unsigned long console_reporting_interval = 5000;  	//  Report to USB console every 5 seconds  
 unsigned long console_interval = 250;             	//  Check console for input every 250 milliseconds
 unsigned long esp8266_interval = 100;			//  Check for input from esp8266 on Serial 1  
 unsigned long led_update_interval = 200;          	//  Update the LED's every 200 miliseconds
-unsigned long nmea_update_interval = 100;         	//  Update NMEA in serial line every 1/10 of a second
+unsigned long nmea_update_interval = 100;         	//  Update NMEA serial-in line every 1/10 of a second
 unsigned long hsnmea_update_interval = 100;		//  Update HS NMEA (SoftwareSerial based) every 1/10 of a second 
 unsigned long hardware_watchdog_interval = 120000; 	//  Do a hardware reset if we don't pat the dog every 2 minutes
 unsigned long nmea_sample_interval = 30000;		//  Nuke nmea data older than 30 seconds
@@ -249,7 +257,6 @@ unsigned long nmea_water_temperature_timestamp = 0;
   Software Serial Stuff
 */
 
-
 #define SOFT_SERIAL_RX_PIN 10
 #define SOFT_SERIAL_TX_PIN 11  // We don't actually currently use this for anything    
 SoftwareSerial soft_serial (SOFT_SERIAL_RX_PIN, SOFT_SERIAL_TX_PIN); 
@@ -263,14 +270,12 @@ bool currently_active = true;
 
 
 /*
-
   We use I2C (Wire.h) for Pressure and Temp
-  
 */
-
 
 Adafruit_BMP085 bmp;
 #define BARO_HISTORY_LENGTH 10
+#define TEMPERATURE_BIAS 5	//  degrees F that BMP, on average, over reports temperature by
 float temperature;
 float pressure;
 float pressure_history[BARO_HISTORY_LENGTH];
@@ -278,7 +283,7 @@ float temperature_history[BARO_HISTORY_LENGTH];
 
 
 /*
-  Some global variables used in parsing from the GPS module
+  Some global variables used in parsing (e.g. from the GPS module)
 */
 
 #define	MAX_CONSOLE_BUFFER  255
@@ -332,11 +337,8 @@ float	nmea_wind_direction = -1.0;	// Angle of true wind in degrees, < 0 invalid/
 float 	nmea_water_temperature = -1.0;	// Temperature of water in _FARENHEIT_, < 0 invalid/not available
 
 
-
-
-
 /*
-    Handy for figuring out if something is making us run out of memory
+  Handy for figuring out if something is making us run out of memory
 */
 
 #ifdef DEBUG_MEMORY_ON
@@ -361,9 +363,8 @@ void print_free_memory()
 
 
 /*
-    Setup for barometric and temperature
+  Setup for barometric and temperature
 */
-
 
 void bmp_setup()
 {
@@ -401,9 +402,7 @@ void gps_setup()
   Serial3.println("$PUBX,40,RMC,0,1,0,0,0,0*46");
   Serial3.println("$PUBX,40,GSV,0,0,0,0,0,0*59");
   Serial3.println("$PUBX,40,VTG,0,0,0,0,0,0*5E");
-
 }
-
 
 
 void watchdog_setup()
@@ -438,7 +437,6 @@ ISR(WDT_vect) // Watchdog timer interrupt.
   }
 }
 
-
 void init_eeprom_memory()
 {
 
@@ -459,14 +457,14 @@ void init_eeprom_memory()
   //  Set default id
   //
   
-  EEPROM.write(10, 'o');
-  EEPROM.write(11, 'u');
-  EEPROM.write(12, 't');
-  EEPROM.write(13, 'o');
-  EEPROM.write(14, 'f');
-  EEPROM.write(15, 'b');
-  EEPROM.write(16, 'o');
-  EEPROM.write(17, 'x');
+  EEPROM.write(10, 'f');
+  EEPROM.write(11, 'a');
+  EEPROM.write(12, 'c');
+  EEPROM.write(13, 't');
+  EEPROM.write(14, 'o');
+  EEPROM.write(15, 'r');
+  EEPROM.write(16, 'y');
+  EEPROM.write(17, 'X');
   
   //
   //  Set to some kind of default AES key
@@ -535,8 +533,6 @@ void read_eeprom_memory()
   //  As part of startup, set variables from non-volatile EEPROM
   //
 
-
-
   //
   //  Read, augment, the write back boot counter
   //
@@ -587,9 +583,9 @@ void resetESP()
   digitalWrite(ESP8266_RESET_PIN, HIGH);
 }
 
+
 void setup()
 {
-  
 
   console_read_buffer.reserve(MAX_CONSOLE_BUFFER);
   esp8266_read_buffer.reserve(MAX_CONSOLE_BUFFER);
@@ -599,7 +595,6 @@ void setup()
   new_message.reserve(MAX_NEW_MESSAGE_SIZE);
   latest_message_to_send.reserve(MAX_LATEST_MESSAGE_SIZE);
   a_string.reserve(MAX_LATEST_MESSAGE_SIZE);
-
 
   //
   //  Serial1 is the ESP8266 (WiFi chip)
@@ -617,6 +612,9 @@ void setup()
   soft_serial.begin(38400);
   soft_serial.listen();
   
+  //
+  //  Misc setup
+  //
 
   bmp_setup();
   gps_setup();
@@ -690,9 +688,6 @@ void setup()
   
   watchdog_setup();
   
-
-
-
   //
   //	Setup User-Reset and ESP-Reset pins
   //
@@ -704,15 +699,12 @@ void setup()
   pinMode(ESP8266_RESET_PIN, OUTPUT);
   digitalWrite(ESP8266_RESET_PIN, HIGH);
 
-
   //
   //  Announce we are up
   //
   
-
   help_info(F("Up and running..."));
   display_current_variables();  
-
 }
 
 
@@ -784,8 +776,6 @@ void add_checksum_and_send_nmea_string(String nmea_string)
   }
   nmea_string += checksum;
 
-
-
   Serial2.println(nmea_string);
 
   if(esp8266IsReady())
@@ -805,7 +795,6 @@ void add_checksum_and_send_nmea_string(String nmea_string)
 void bmp_read()
 {
 
-
   //
   //	On some boards we very occasionally get an odd reading, so this
   //	history, average thing is just there to get rid of outliers
@@ -824,8 +813,7 @@ void bmp_read()
     temperature_history[i] = temperature_history[i+1];
   }
 
-  //temperature_history[BARO_HISTORY_LENGTH - 1] = (1.8 * bmp.readTemperature()) + 32 - 5.6;
-  temperature_history[BARO_HISTORY_LENGTH - 1] = (1.8 * bmp.readTemperature()) + 32;
+  temperature_history[BARO_HISTORY_LENGTH - 1] = (1.8 * bmp.readTemperature()) + 32 - TEMPERATURE_BIAS ;
 
   if(handy > 0)
   {
@@ -854,7 +842,7 @@ void bmp_read()
 
 
 
-  for(i =0; i < BARO_HISTORY_LENGTH - 1 ; i++)
+  for(i = 0; i < BARO_HISTORY_LENGTH - 1 ; i++)
   {
     if(pressure_history[i] > 1)
     {
@@ -890,8 +878,6 @@ void bmp_read()
     pressure = pressure_history[BARO_HISTORY_LENGTH - 1];
   }
 
-
-
   //
   //	Output Temperature and Pressure as NMEA sentences in case anyone is listening
   //
@@ -924,9 +910,6 @@ void bmp_read()
   //           
   //
 
-
-
-
   
   //
   // We round robin these to not flood the NMEA out channel with realtively minor info
@@ -938,7 +921,6 @@ void bmp_read()
   //
   //
   
-
   if(nmea_cycle == 0)
   {
     a_string = String(F("$IIMTA,")) 
@@ -954,7 +936,6 @@ void bmp_read()
   //
   //
 
-
   else if(nmea_cycle == 1)
   {
     a_string = String(F("$IIMDA,")) 
@@ -964,7 +945,6 @@ void bmp_read()
     	     + String(F(",B,"))
              + String((temperature - 32.0) * (5.0 / 9.0),2)
              + String(F(",C,,,,,,,,,,,,,,*"));
-
 
     add_checksum_and_send_nmea_string(a_string);   
   }
@@ -1040,6 +1020,13 @@ void parse_gps_buffer_as_rmc()
       debug_info(F("Bad RMC string"));
       debug_info(gps_read_buffer);
       #endif
+
+      #ifdef ACTIVE_DEBUG_ON
+      debug_info(F("active: OFF BRMC"));
+      #endif
+      currently_active = false;
+
+
       return;
   }
       
@@ -1131,14 +1118,14 @@ void parse_gps_buffer_as_rmc()
     if(float_one > 0.25)  //  Moving faster than a 1/4 knot?
     {
       #ifdef ACTIVE_DEBUG_ON
-      debug_info(F("active: ON"));
+      debug_info(F("active: ON "), float_one);
       #endif
       currently_active = true;
     }
     else
     {
       #ifdef ACTIVE_DEBUG_ON
-      debug_info(F("active: OFF"));
+      debug_info(F("active: OFF "), float_one);
       #endif
       currently_active = false;
     }
@@ -1150,6 +1137,7 @@ void parse_gps_buffer_as_rmc()
     #endif
     currently_active = false;
   }
+ 
 }
 
 void parse_gps_buffer_as_gga()
@@ -1285,12 +1273,12 @@ bool validate_gps_buffer()
     return true;
   }
 
-
   #ifdef GPS_DEBUG_ON
   debug_info(String(F("Bad GPS buffer: ")) + gps_read_buffer);
   #endif
   return false;  
 }
+
 
 bool validate_and_maybe_remediate_gps_buffer()
 {
@@ -1305,6 +1293,7 @@ bool validate_and_maybe_remediate_gps_buffer()
   }
   return false;
 }
+
 
 bool validate_nmea_buffer(bool hsnmea = false)
 {
@@ -1361,7 +1350,6 @@ bool validate_nmea_buffer(bool hsnmea = false)
 
 void gps_read()
 {
-
   while(Serial3.available() && (int) gps_read_buffer.length() < MAX_GPS_BUFFER)
   {
     int incoming_byte = Serial3.read();
@@ -1409,6 +1397,7 @@ void gps_read()
   }
 }
 
+
 void voltage_read()
 {
   battery_one 	= analogRead(1) / 37.213; 
@@ -1419,7 +1408,6 @@ void voltage_read()
   charger_two 	= analogRead(5) / 37.213; 
   charger_three	= analogRead(6) / 37.213;
 }
-
 
 
 void append_formatted_value(String &the_string, int value)
@@ -1434,6 +1422,7 @@ void append_formatted_value(String &the_string, int value)
     the_string += value;
   }
 }
+
 
 void add_timestamp_to_string(String &the_string)
 {
@@ -1535,6 +1524,7 @@ void append_float_to_string(String &the_string, float x)
   the_string += String(temp_string);
 }
 
+
 void possibly_append_data(float value, float test, String tag)
 {
   if(value > test)
@@ -1543,6 +1533,7 @@ void possibly_append_data(float value, float test, String tag)
     append_float_to_string(new_message, value);
   }
 }
+
 
 void report_state(bool console_only)
 {
@@ -1622,13 +1613,11 @@ void report_state(bool console_only)
     send_encoded_message_to_esp8266();
   }
   echo_info(new_message);
-
 }
+
 
 void parse_esp8266()
 {
-
-
   if(esp8266_read_buffer.startsWith(F("$FHI")))
   {
     if(esp8266_read_buffer.length() == 23 && esp8266_read_buffer.substring(20).startsWith(F("c=")))
@@ -1702,6 +1691,7 @@ void parse_esp8266()
   }
 }  
 
+
 void parse_console()
 {
   //
@@ -1716,7 +1706,6 @@ void parse_console()
 
 void esp8266_read()
 {
-
   while(Serial1.available() && (int) esp8266_read_buffer.length() < MAX_CONSOLE_BUFFER)
   {
      int incoming_byte = Serial1.read();
@@ -1739,6 +1728,7 @@ void esp8266_read()
     esp8266_read_buffer = "";
   }
 }
+
 
 void console_read()
 {
@@ -1773,6 +1763,7 @@ void echo_info(String some_info)
   Serial.println(some_info);
 }
 
+
 void debug_info_core(String some_info)
 {
   some_info.replace('\n','|');
@@ -1793,8 +1784,8 @@ void debug_info_core(String some_info)
   Serial1.print(F("$    "));
   Serial1.print(String(F("[")) + String(hour()) + F(":") + String(minute()) + F(":") + String(second()) + F("] "));
   Serial1.print(some_info);
-
 }
+
 
 void debug_info(String some_info)
 {
@@ -1802,6 +1793,7 @@ void debug_info(String some_info)
   Serial.println();
   Serial1.println();
 }
+
 
 void debug_info(String some_info, float x)
 {
@@ -1818,9 +1810,9 @@ void debug_info(String some_info, int x)
   Serial1.println(x);
 }
 
+
 void update_leds()
 {
-
   if(user_reset_pin_state == HIGH)
   {
     unsigned long current_timestamp = millis();
@@ -1858,8 +1850,6 @@ void update_leds()
     }
     return;
   }
-
-
   if(gps_valid)
   {
     digitalWrite(GPS_LED_1, LOW);
@@ -1881,11 +1871,7 @@ void update_leds()
     digitalWrite(COM_LED_1, HIGH);
     digitalWrite(COM_LED_2, LOW);
   } 
-
-
-
 }
-
 
 
 bool popout_nmea_value(String data_type, int comma_begin, int comma_end, float &target, bool convert_ctof = false)
@@ -1909,6 +1895,7 @@ bool popout_nmea_value(String data_type, int comma_begin, int comma_end, float &
   }
   return false;
 }
+
 
 void parse_nmea_sentence()
 {
@@ -1996,6 +1983,7 @@ void parse_nmea_sentence()
   }
 }
 
+
 void update_nmea()
 {
   while(Serial2.available() && (int) nmea_read_buffer.length() < MAX_NMEA_BUFFER)
@@ -2066,8 +2054,6 @@ void update_hsnmea()
     hsnmea_read_buffer = "";
   }
 }
-
-
 
 
 bool try_and_send_encoded_message_to_esp8266()
@@ -2171,7 +2157,6 @@ void factoryReset()
 }
 
 
-
 void dualReboot()
 {
   digitalWrite(GPS_LED_1, LOW);
@@ -2181,7 +2166,6 @@ void dualReboot()
   resetESP();
   resetFunc();
 }
-
 
 
 void  send_encoded_message_to_esp8266()
@@ -2206,7 +2190,6 @@ void encode_latest_message_to_send()
   #ifdef BYPASS_AES_ON
     return;
   #endif
-
 
   #ifdef STRESS_MEMORY_ON
   for(i=0; i < 10; i++)
@@ -2301,6 +2284,7 @@ void encode_latest_message_to_send()
 
 }
 
+
 void zero_nmea_values()
 {
   //
@@ -2329,6 +2313,7 @@ void zero_nmea_values()
     nmea_water_temperature = -1.0;
   }
 }
+
 
 void loop()
 {
@@ -2374,14 +2359,12 @@ void loop()
     console_read();
   }
 
-
   if(current_timestamp - nmea_previous_timestamp > nmea_update_interval)
   {
     nmea_previous_timestamp = current_timestamp;
     update_nmea();
   }
   
-
   if(current_timestamp - hsnmea_previous_timestamp > hsnmea_update_interval)
   {
     hsnmea_previous_timestamp = current_timestamp;
@@ -2392,7 +2375,7 @@ void loop()
       Reporting routines
   */
   
-  if(currently_active == true && currently_connected)
+  if(currently_active == true)
   {
     if(current_timestamp - previous_active_timestamp >  active_reporting_interval)
     {
@@ -2412,6 +2395,7 @@ void loop()
       previous_idle_timestamp = current_timestamp;
     }
   }
+
   if(current_timestamp - previous_console_timestamp >  console_reporting_interval)
   {
     previous_console_timestamp = current_timestamp;
@@ -2422,9 +2406,6 @@ void loop()
     #endif
     pat_the_watchdog();	// Bump watchdog timer up to current time;
   }
-
-
-
 
   //
   //	Check on user reset button
@@ -2460,6 +2441,7 @@ void loop()
     led_previous_timestamp = current_timestamp;
     update_leds();
   }
+
   
   #ifdef EXECUTION_PATH_DEBUG_ON
   if(random(0,100) < 50)
@@ -2474,6 +2456,3 @@ void loop()
   }
   #endif
 }
-
-
-
