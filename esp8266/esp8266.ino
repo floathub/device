@@ -55,9 +55,9 @@ extern "C" {
 //#define HTTP_DEBUG_ON
 //#define MDNS_DEBUG_ON
 //#define STAT_DEBUG_ON
-#define INPT_DEBUG_ON
-#define WIFI_DEBUG_ON
-#define FILE_DEBUG_ON
+//#define INPT_DEBUG_ON
+//#define WIFI_DEBUG_ON
+//#define FILE_DEBUG_ON
 //#define FILE_SERVE_ON	// Useful when debuggig to see SPIFF files from a browser
 
 //
@@ -65,7 +65,6 @@ extern "C" {
 //
 
 #define MAX_COOKIES 10
-#define DEBUG_ON
 
 
 //
