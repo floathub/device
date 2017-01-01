@@ -1363,27 +1363,24 @@ void handlePublicWireless()
   String wifi_names[12];
   byte num_names = 0; 
 
-//  if(WiFi.localIP() > 0)
-//  {
-    byte numSsid = WiFi.scanNetworks();
-    for (int i = 0; i < numSsid; i++)
+  byte numSsid = WiFi.scanNetworks();
+  for (int i = 0; i < numSsid; i++)
+  {
+    bool match = false;
+    for(int j = 0; j < num_names; j++)
     {
-      bool match = false;
-      for(int j = 0; j < num_names; j++)
+      if (wifi_names[j] == String(WiFi.SSID(i)))
       {
-        if (wifi_names[j] == String(WiFi.SSID(i)))
-        {
-          match = true;
-          break;
-        }
-      }
-      if(!match && num_names < 12)
-      {
-        wifi_names[num_names] = String(WiFi.SSID(i));
-        num_names++;
+        match = true;
+        break;
       }
     }
-//  }
+    if(!match && num_names < 12)
+    {
+      wifi_names[num_names] = String(WiFi.SSID(i));
+      num_names++;
+    }
+  }
 
   //
   // Now build the page to send
@@ -2440,6 +2437,7 @@ void pushMessageQueue(String a_message)
 
 void queueMessage(String a_message)
 {
+
   //
   //   Check a few things
   //
@@ -2452,11 +2450,12 @@ void queueMessage(String a_message)
     #endif
     return;
   }
+
   String checksum_a = a_message.substring(checksum_start + 1);
 
   a_message = a_message.substring(0, a_message.length() - 3);
 
-  byte a_byte;
+  byte a_byte = 0;
   for (int i = 0; i < a_message.length(); i++)
   {
     a_byte = a_byte ^ a_message.charAt(i); 
@@ -2677,12 +2676,12 @@ void parseInput(String &the_input)
     { 	
       processNewPortValue("p=", float_hub_server_port, new_value);
     }
+    #ifdef INPT_DEBUG_ON
     else
     {
-      #ifdef INPT_DEBUG_ON
       debug_info(F("Bad number"));
-      #endif
     }
+    #endif
   }
   #ifdef INPT_DEBUG_ON
   else if(the_input.startsWith("p="))
@@ -2759,12 +2758,12 @@ void parseInput(String &the_input)
       processNewFlagValue("F=", public_ip_is_static, new_value);
       kickWiFi();
     }
+    #ifdef INPT_DEBUG_ON
     else
     {
-      #ifdef INPT_DEBUG_ON
       debug_info(F("Bad boolean"));
-      #endif
     }
+    #endif
   }
   #ifdef INPT_DEBUG_ON
   else if(the_input.startsWith("F="))
@@ -2784,12 +2783,12 @@ void parseInput(String &the_input)
         kickWiFi();
       }
     }
+    #ifdef INPT_DEBUG_ON
     else
     {
-      #ifdef INPT_DEBUG_ON
       debug_info(F("Bad IP"));
-      #endif
     }
+    #endif
   }
   #ifdef INPT_DEBUG_ON
   else if(the_input.startsWith("I="))
@@ -2809,12 +2808,12 @@ void parseInput(String &the_input)
         kickWiFi();
       }
     }
+    #ifdef INPT_DEBUG_ON
     else
     {
-      #ifdef INPT_DEBUG_ON
       debug_info(F("Bad IP"));
-      #endif
     }
+    #endif
   }
   #ifdef INPT_DEBUG_ON
   else if(the_input.startsWith("G="))
@@ -2833,12 +2832,12 @@ void parseInput(String &the_input)
         kickWiFi();
       }
     }
+    #ifdef INPT_DEBUG_ON
     else
     {
-      #ifdef INPT_DEBUG_ON
       debug_info(F("Bad IP"));
-      #endif
     }
+    #endif
   }
   #ifdef INPT_DEBUG_ON
   else if(the_input.startsWith("M="))
@@ -2858,12 +2857,12 @@ void parseInput(String &the_input)
         kickWiFi();
       }
     }
+    #ifdef INPT_DEBUG_ON
     else
     {
-      #ifdef INPT_DEBUG_ON
       debug_info(F("Bad IP"));
-      #endif
     }
+    #endif
   }
   #ifdef INPT_DEBUG_ON
   else if(the_input.startsWith("D="))
@@ -2937,12 +2936,12 @@ void parseInput(String &the_input)
       processNewFlagValue("N=", nmea_mux_on, new_value);
       kickNMEA();      
     }
+    #ifdef INPT_DEBUG_ON
     else
     {
-      #ifdef INPT_DEBUG_ON
       debug_info(F("Bad boolean"));
-      #endif
     }
+    #endif
   }
   #ifdef INPT_DEBUG_ON
   else if(the_input.startsWith("N="))
@@ -2959,12 +2958,12 @@ void parseInput(String &the_input)
       processNewFlagValue("e=", nmea_mux_private, new_value);
       kickNMEA();      
     }
+    #ifdef INPT_DEBUG_ON
     else
     {
-      #ifdef INPT_DEBUG_ON
       debug_info(F("Bad boolean"));
-      #endif
     }
+    #endif
   }
   #ifdef INPT_DEBUG_ON
   else if(the_input.startsWith("e="))
@@ -2980,12 +2979,12 @@ void parseInput(String &the_input)
     { 	
       processNewPortValue("n=", nmea_mux_port, new_value);
     }
+    #ifdef INPT_DEBUG_ON
     else
     {
-      #ifdef INPT_DEBUG_ON
       debug_info(F("Bad number"));
-      #endif
     }
+    #endif
   }
   #ifdef INPT_DEBUG_ON
   else if(the_input.startsWith("n="))
@@ -3023,12 +3022,12 @@ void parseInput(String &the_input)
     { 	
       processNewFlagValue("P=", phone_home_on, new_value);
     }
+    #ifdef INPT_DEBUG_ON
     else
     {
-      #ifdef INPT_DEBUG_ON
       debug_info(F("Bad boolean"));
-      #endif
     }
+    #endif
   }
   #ifdef INPT_DEBUG_ON
   else if(the_input.startsWith("P="))
@@ -3045,12 +3044,12 @@ void parseInput(String &the_input)
       processNewFlagValue("Z=", virtual_serial_on, new_value);
       kickVirtualSerial();
     }
+    #ifdef INPT_DEBUG_ON
     else
     {
-      #ifdef INPT_DEBUG_ON
       debug_info(F("Bad boolean"));
-      #endif
     }
+    #endif
   }
   #ifdef INPT_DEBUG_ON
   else if(the_input.startsWith("Z="))
@@ -3067,12 +3066,12 @@ void parseInput(String &the_input)
       processNewPortValue("z=", virtual_serial_port, new_value);
       kickVirtualSerial();
     }
+    #ifdef INPT_DEBUG_ON
     else
     {
-      #ifdef INPT_DEBUG_ON
       debug_info(F("Bad number"));
-      #endif
     }
+    #endif
   }
   #ifdef INPT_DEBUG_ON
   else if(the_input.startsWith("z="))
@@ -3385,13 +3384,13 @@ void fdrHouseKeeping()
             wifi_read_buffer = "";
             expected_fdr_response_time = millis() + FDR_RESPONSE_MAX ;
           }
-          #ifdef WIFI_DEBUG_ON
           else
           {
+            #ifdef WIFI_DEBUG_ON
             debug_info(F("wifi sock prob"));
+            #endif
             fdr_client.stop();
           }
-          #endif
         }
         else
         {
