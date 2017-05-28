@@ -1,7 +1,7 @@
 /*
 
  FloatHub ESP8266 Code
- (c) 2015-2016 Modiot Labs
+ (c) 2015-2017 Modiot Labs
  
 */
 
@@ -25,7 +25,6 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
 #include <ESP8266mDNS.h>
-//	#include <DNSServer.h>
 #include <EEPROM.h>
 #include <FS.h>
 #include "static.h"
@@ -66,11 +65,11 @@ extern "C" {
 //
 
 #define MAX_COOKIES 10
-#define DEBUG_ON
 
 
 //
-//  User settable values (anything in this list can be changed via the web interface)
+//  User settable values (anything in this list can be changed via the web interface
+// or the cli)
 //
 
 
@@ -82,6 +81,7 @@ String private_wifi_password;
 String mdns_name;
 bool	public_ip_is_static = false;
 bool	called_mdns_after_connection = false;
+bool	tried_public_wifi_recently = false;
 IPAddress public_static_ip;
 IPAddress public_static_gate;
 IPAddress public_static_mask;
@@ -104,7 +104,7 @@ String	web_interface_password;			// default: floathub
 
 //	Advanced (hidden) settings
 
-bool	      phone_home_on;
+bool	      phone_home_on;			// default: yes
 String        float_hub_server;			// default: fdr.floathub.net
 unsigned int  float_hub_server_port;		// default: 50003
 bool	      virtual_serial_on;		// default: no
@@ -131,13 +131,14 @@ enum communication_state
 };
         
 communication_state current_communication_state = idle; 
+int  serial_ready_pin = 5;
 
 bool filesystem_is_working;
 bool latest_message_from_file;
 long unsigned int low_file_pointer;
 long unsigned int high_file_pointer;
 #define MIN_SPIFF_SPACE	4096
-int  serial_ready_pin = 5;
+
 
 //
 //	Struct to hold our authentication cookies
@@ -164,7 +165,7 @@ COOKIES cookies[MAX_COOKIES];
 
 
 unsigned long house_keeping_interval     	   = 3000;  // Do house keeping every 3 seconds
-unsigned long wifi_housekeeping_interval     	   = 60000; // Do wifi house keeping every minute 
+unsigned long wifi_housekeeping_interval     	   = 20000; // Do wifi house keeping three times a minute 
 unsigned long nmea_housekeeping_interval 	   = 1000;  // Check on nmea connections every second	
 unsigned long virtual_serial_housekeeping_interval = 500;   // Check on virtual serial connections every 1/2 second
 unsigned long console_read_interval		   = 10;    // Check on "console" (mostly stuff from main board) every 1/100th of a second
@@ -172,7 +173,7 @@ unsigned long fdr_communications_interval	   = 100;   // Check on status of push
 unsigned long heartbeat_interval		   = 1000;  // Once a second, send heartbeat update 
 unsigned long network_interval			   = 200;   // Every 1/5th of a second, look at web requests/etc
 int           heartbeat_cycle			   = 0;     // Which heartbeat value to send
-int	      wifi_housekeeping_cycle_counter	   = 0;     // Cycle counter for WiFi house keeping
+int	      wifi_housekeeping_cycle_counter	   = 1;     // Cycle counter for WiFi house keeping
 
 unsigned long house_keeping_previous_timestamp = 0;
 unsigned long wifi_housekeeping_previous_timestamp = 0;
@@ -213,7 +214,7 @@ String	virtual_serial_read_buffer;
 //
 
 unsigned watchdog_timestamp;
-#define  WATCHDOG_TIME_LIMIT 3600000UL	// If we do not manage to get any data through to FDR after 1 hour, reboot the whole shebang 
+#define  WATCHDOG_TIME_LIMIT 21600000UL	// If we do not manage to get any data through to FDR after 6 hours, reboot the whole shebang 
 
 
 void help_info(String some_info)
@@ -240,7 +241,8 @@ void internal_info(String some_info)
 {
 
   //
-  // Send only on internal console and preface with FHI 
+  // Send only on internal console and preface with FHI (used to send
+  // config/settings the esp8266 has to share with the Mega)
   //
 
   Serial.print(F("$FHI:"));
@@ -358,7 +360,7 @@ void init_eeprom_memory()
   int i;
 
   //
-  //  This function is called only during factory reset or intial startup
+  //  This function is called only during factory reset or very first startup
   //
     
   for(i = 6; i < 10; i++)
@@ -1121,7 +1123,7 @@ void handlePrivateWireless()
   }
 
   //
-  // First see if we received any from submission
+  // First see if we received any form submission
   // 
 
   String error_message = "";
@@ -1228,6 +1230,7 @@ void kickWiFi(bool ap_only=false)
     #ifdef WIFI_DEBUG_ON
     debug_info(F("Kicking AP WiFi"));
     #endif
+    tried_public_wifi_recently = false;
     WiFi.setAutoConnect(false);
     WiFi.mode(WIFI_AP);
     WiFi.softAP(private_wifi_ssid.c_str(), private_wifi_password.c_str());
@@ -1238,6 +1241,7 @@ void kickWiFi(bool ap_only=false)
     #ifdef WIFI_DEBUG_ON
     debug_info(F("Kicking Full WiFi"));
     #endif
+    tried_public_wifi_recently = true;
     WiFi.setAutoConnect(true);
     WiFi.mode(WIFI_AP_STA);
     WiFi.begin(public_wifi_ssid.c_str(), public_wifi_password.c_str());
@@ -1278,7 +1282,7 @@ void handlePublicWireless()
   }
 
   //
-  // First see if we received any from submission
+  // First see if we received any form submission
   // 
 
   String error_message = "";
@@ -1359,25 +1363,22 @@ void handlePublicWireless()
   String wifi_names[12];
   byte num_names = 0; 
 
-  if(WiFi.localIP() > 0)
+  byte numSsid = WiFi.scanNetworks();
+  for (int i = 0; i < numSsid; i++)
   {
-    byte numSsid = WiFi.scanNetworks();
-    for (int i = 0; i < numSsid; i++)
+    bool match = false;
+    for(int j = 0; j < num_names; j++)
     {
-      bool match = false;
-      for(int j = 0; j < num_names; j++)
+      if (wifi_names[j] == String(WiFi.SSID(i)))
       {
-        if (wifi_names[j] == String(WiFi.SSID(i)))
-        {
-          match = true;
-          break;
-        }
+        match = true;
+        break;
       }
-      if(!match && num_names < 12)
-      {
-        wifi_names[num_names] = String(WiFi.SSID(i));
-        num_names++;
-      }
+    }
+    if(!match && num_names < 12)
+    {
+      wifi_names[num_names] = String(WiFi.SSID(i));
+      num_names++;
     }
   }
 
@@ -1631,8 +1632,6 @@ void handleAdvanced()
 
   if(web_server.arg("savebutton") == "True")
   {
-
-
     if(web_server.arg("phoneon") == "yes")
     {
       phone_home_on = true;
@@ -1661,7 +1660,6 @@ void handleAdvanced()
     {
       virtual_serial_on = false; 
       virtual_serial_changed = true;
-   
     }  
 
     if(virtual_serial_port != web_server.arg("vsport").toInt())
@@ -1677,9 +1675,7 @@ void handleAdvanced()
       error_message += F("Device reboot recommended");
       kickVirtualSerial();
     }
-
   }
-
 
   String page = FPSTR(HTTP_INITA);
   page += FPSTR(HTTP_TITLE);
@@ -1738,7 +1734,7 @@ void handleAccount()
   }
 
   //
-  // First see if we received any from submission
+  // First see if we received any form submission
   // 
 
   String error_message = "";
@@ -2454,6 +2450,7 @@ void queueMessage(String a_message)
     #endif
     return;
   }
+
   String checksum_a = a_message.substring(checksum_start + 1);
 
   a_message = a_message.substring(0, a_message.length() - 3);
@@ -2679,12 +2676,12 @@ void parseInput(String &the_input)
     { 	
       processNewPortValue("p=", float_hub_server_port, new_value);
     }
+    #ifdef INPT_DEBUG_ON
     else
     {
-      #ifdef INPT_DEBUG_ON
       debug_info(F("Bad number"));
-      #endif
     }
+    #endif
   }
   #ifdef INPT_DEBUG_ON
   else if(the_input.startsWith("p="))
@@ -2761,12 +2758,12 @@ void parseInput(String &the_input)
       processNewFlagValue("F=", public_ip_is_static, new_value);
       kickWiFi();
     }
+    #ifdef INPT_DEBUG_ON
     else
     {
-      #ifdef INPT_DEBUG_ON
       debug_info(F("Bad boolean"));
-      #endif
     }
+    #endif
   }
   #ifdef INPT_DEBUG_ON
   else if(the_input.startsWith("F="))
@@ -2786,12 +2783,12 @@ void parseInput(String &the_input)
         kickWiFi();
       }
     }
+    #ifdef INPT_DEBUG_ON
     else
     {
-      #ifdef INPT_DEBUG_ON
       debug_info(F("Bad IP"));
-      #endif
     }
+    #endif
   }
   #ifdef INPT_DEBUG_ON
   else if(the_input.startsWith("I="))
@@ -2811,12 +2808,12 @@ void parseInput(String &the_input)
         kickWiFi();
       }
     }
+    #ifdef INPT_DEBUG_ON
     else
     {
-      #ifdef INPT_DEBUG_ON
       debug_info(F("Bad IP"));
-      #endif
     }
+    #endif
   }
   #ifdef INPT_DEBUG_ON
   else if(the_input.startsWith("G="))
@@ -2835,12 +2832,12 @@ void parseInput(String &the_input)
         kickWiFi();
       }
     }
+    #ifdef INPT_DEBUG_ON
     else
     {
-      #ifdef INPT_DEBUG_ON
       debug_info(F("Bad IP"));
-      #endif
     }
+    #endif
   }
   #ifdef INPT_DEBUG_ON
   else if(the_input.startsWith("M="))
@@ -2860,12 +2857,12 @@ void parseInput(String &the_input)
         kickWiFi();
       }
     }
+    #ifdef INPT_DEBUG_ON
     else
     {
-      #ifdef INPT_DEBUG_ON
       debug_info(F("Bad IP"));
-      #endif
     }
+    #endif
   }
   #ifdef INPT_DEBUG_ON
   else if(the_input.startsWith("D="))
@@ -2939,12 +2936,12 @@ void parseInput(String &the_input)
       processNewFlagValue("N=", nmea_mux_on, new_value);
       kickNMEA();      
     }
+    #ifdef INPT_DEBUG_ON
     else
     {
-      #ifdef INPT_DEBUG_ON
       debug_info(F("Bad boolean"));
-      #endif
     }
+    #endif
   }
   #ifdef INPT_DEBUG_ON
   else if(the_input.startsWith("N="))
@@ -2961,12 +2958,12 @@ void parseInput(String &the_input)
       processNewFlagValue("e=", nmea_mux_private, new_value);
       kickNMEA();      
     }
+    #ifdef INPT_DEBUG_ON
     else
     {
-      #ifdef INPT_DEBUG_ON
       debug_info(F("Bad boolean"));
-      #endif
     }
+    #endif
   }
   #ifdef INPT_DEBUG_ON
   else if(the_input.startsWith("e="))
@@ -2982,12 +2979,12 @@ void parseInput(String &the_input)
     { 	
       processNewPortValue("n=", nmea_mux_port, new_value);
     }
+    #ifdef INPT_DEBUG_ON
     else
     {
-      #ifdef INPT_DEBUG_ON
       debug_info(F("Bad number"));
-      #endif
     }
+    #endif
   }
   #ifdef INPT_DEBUG_ON
   else if(the_input.startsWith("n="))
@@ -3025,12 +3022,12 @@ void parseInput(String &the_input)
     { 	
       processNewFlagValue("P=", phone_home_on, new_value);
     }
+    #ifdef INPT_DEBUG_ON
     else
     {
-      #ifdef INPT_DEBUG_ON
       debug_info(F("Bad boolean"));
-      #endif
     }
+    #endif
   }
   #ifdef INPT_DEBUG_ON
   else if(the_input.startsWith("P="))
@@ -3047,12 +3044,12 @@ void parseInput(String &the_input)
       processNewFlagValue("Z=", virtual_serial_on, new_value);
       kickVirtualSerial();
     }
+    #ifdef INPT_DEBUG_ON
     else
     {
-      #ifdef INPT_DEBUG_ON
       debug_info(F("Bad boolean"));
-      #endif
     }
+    #endif
   }
   #ifdef INPT_DEBUG_ON
   else if(the_input.startsWith("Z="))
@@ -3069,12 +3066,12 @@ void parseInput(String &the_input)
       processNewPortValue("z=", virtual_serial_port, new_value);
       kickVirtualSerial();
     }
+    #ifdef INPT_DEBUG_ON
     else
     {
-      #ifdef INPT_DEBUG_ON
       debug_info(F("Bad number"));
-      #endif
     }
+    #endif
   }
   #ifdef INPT_DEBUG_ON
   else if(the_input.startsWith("z="))
@@ -3094,7 +3091,6 @@ void parseInput(String &the_input)
 
 void virtualSerialHouseKeeping()
 {
-
   if(!virtual_serial_server || !virtual_serial_on )
   {
     return;
@@ -3240,8 +3236,15 @@ void houseKeeping()
 
 void WiFiHouseKeeping()
 {
+
+  wifi_housekeeping_cycle_counter++;
+  if(wifi_housekeeping_cycle_counter > 10)
+  {
+    wifi_housekeeping_cycle_counter = 1;
+  }
+
   #ifdef WIFI_DEBUG_ON
-  debug_info("WiFi House Keeping ", wifi_housekeeping_cycle_counter);
+  debug_info(F("WiFi HK Cycle: "), wifi_housekeeping_cycle_counter);
   #endif
 
   //
@@ -3255,34 +3258,59 @@ void WiFiHouseKeeping()
   //
   // OK, we are _not_ connected. Once every ten cycles through here, try to
   // connect if the public wifi is set to anything other than factory
-  // default
+  // default _and_ we can see the public wifi station id in a scan
   //
-
-  wifi_housekeeping_cycle_counter++;
-  if(wifi_housekeeping_cycle_counter > 9)
-  {
-    wifi_housekeeping_cycle_counter = 0;
-  }
 
   if(public_wifi_ssid == "factoryX")
   {
     return;
   }
 
-  if(wifi_housekeeping_cycle_counter == 8 )
-  {
-    #ifdef WIFI_DEBUG_ON
-    debug_info("WiFi HouseK: Trying Public");
-    #endif
+  //
+  //  If we were connected, then we need to go to AP only mode as it looks
+  // like whatever we were connected to has gone away
+  //
 
-    kickWiFi();
-  }
-  else if (wifi_housekeeping_cycle_counter == 9)
+  if (tried_public_wifi_recently == true)
   {
     #ifdef WIFI_DEBUG_ON
-    debug_info("WiFi HouseK: Killing Public");
+    debug_info("WiFi HK: Public Went Away");
     #endif
     kickWiFi(true);
+  }
+
+  //
+  //	Otherwise, we look for out public station id once every 10 cycles
+  // through here and try to connect only if we see it
+  //
+
+  if(wifi_housekeeping_cycle_counter == 10 )
+  {
+    bool saw_public = false;    
+
+    byte numSsid = WiFi.scanNetworks();
+    for (int i = 0; i < numSsid; i++)
+    {
+      if (public_wifi_ssid == String(WiFi.SSID(i)))
+      {
+        saw_public = true;
+        break;
+      }
+    }
+
+    if(saw_public)
+    {
+      #ifdef WIFI_DEBUG_ON
+      debug_info(F("WiFi HK: Trying Public"));
+      #endif
+      kickWiFi();
+    }
+    else
+    {
+      #ifdef WIFI_DEBUG_ON
+      debug_info(F("Wifi HK: Skip Public, No Scan"));
+      #endif
+    }
   }
 }
 
@@ -3355,13 +3383,13 @@ void fdrHouseKeeping()
             wifi_read_buffer = "";
             expected_fdr_response_time = millis() + FDR_RESPONSE_MAX ;
           }
-          #ifdef WIFI_DEBUG_ON
           else
           {
+            #ifdef WIFI_DEBUG_ON
             debug_info(F("wifi sock prob"));
+            #endif
             fdr_client.stop();
           }
-          #endif
         }
         else
         {
