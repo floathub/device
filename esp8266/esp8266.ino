@@ -56,9 +56,9 @@ extern "C" {
 //#define HTTP_DEBUG_ON
 //#define MDNS_DEBUG_ON
 //#define STAT_DEBUG_ON
-#define INPT_DEBUG_ON
-#define WIFI_DEBUG_ON
-#define FILE_DEBUG_ON
+//#define INPT_DEBUG_ON
+//#define WIFI_DEBUG_ON
+//#define FILE_DEBUG_ON
 //#define FILE_SERVE_ON	// Useful when debuggig to see SPIFF files from a browser
 
 //
@@ -2441,6 +2441,7 @@ void pushMessageQueue(String a_message)
 
 void queueMessage(String a_message)
 {
+
   //
   //   Check a few things
   //
@@ -2457,7 +2458,7 @@ void queueMessage(String a_message)
 
   a_message = a_message.substring(0, a_message.length() - 3);
 
-  byte a_byte;
+  byte a_byte = 0;
   for (int i = 0; i < a_message.length(); i++)
   {
     a_byte = a_byte ^ a_message.charAt(i); 
@@ -3324,7 +3325,6 @@ void heartbeatHouseKeeping()
 
 void fdrHouseKeeping()
 {
-
   if(WiFi.status() == WL_CONNECTED && WiFi.localIP() > 0)
   {
     if(!called_mdns_after_connection)

@@ -128,7 +128,7 @@
 //#define STRESS_MEMORY_ON
 //#define BYPASS_AES_ON
 //#define BARO_DEBUG_ON	
-#define ACTIVE_DEBUG_ON
+//#define ACTIVE_DEBUG_ON
 //#define SERIAL_DEBUG_ON
 //#define SOFTSERIAL_DEBUG_ON
 
@@ -216,6 +216,7 @@ unsigned long pump_interval = 1200;               	//  Check pump state every 1.
 unsigned long active_reporting_interval = 30000;  	//  When in use, report data every 30 seconds
 //unsigned long idle_reporting_interval = 10000;   	//  Stress testing during dvelopment
 unsigned long idle_reporting_interval = 600000;   	//  When idle, report data every 10 minutes
+//unsigned long idle_reporting_interval = 30000;   	//  Demoboat only every 30 seconds
 unsigned long console_reporting_interval = 5000;  	//  Report to USB console every 5 seconds  
 unsigned long console_interval = 250;             	//  Check console for input every 250 milliseconds
 unsigned long esp8266_interval = 100;			//  Check for input from esp8266 on Serial 1  
