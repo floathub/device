@@ -2012,7 +2012,8 @@ void parse_nmea_sentence()
 
 void update_nmea()
 {
-  while(Serial2.available() && (int) nmea_read_buffer.length() < MAX_NMEA_BUFFER)
+  bool keep_going = true;
+  while(Serial2.available() && (int) nmea_read_buffer.length() < MAX_NMEA_BUFFER && keep_going == true)
   {
      int incoming_byte = Serial2.read();
      if(incoming_byte == '\n')
@@ -2023,6 +2024,7 @@ void update_nmea()
          parse_nmea_sentence();
        }
        nmea_read_buffer = "";
+       keep_going = false;
      }
      else if (incoming_byte == '\r')
      {
@@ -2042,7 +2044,8 @@ void update_nmea()
 
 void update_hsnmea()
 {
-  while(soft_serial.available() && (int) hsnmea_read_buffer.length() < MAX_NMEA_BUFFER)
+  bool keep_going = true;
+  while(soft_serial.available() && (int) hsnmea_read_buffer.length() < MAX_NMEA_BUFFER && keep_going == true)
   {
     int incoming_byte = soft_serial.read();
     if(incoming_byte == '\n')
@@ -2061,6 +2064,7 @@ void update_hsnmea()
       }
       #endif
       hsnmea_read_buffer = "";
+      keep_going = false;
     }
     else if (incoming_byte == '\r')
     {
