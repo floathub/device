@@ -110,6 +110,7 @@
 
 #include <Wire.h>
 #include "./libs/Adafruit_BMP/Adafruit_BMP085.h"
+#include "./libs/Adafruit_BMP280/Adafruit_BMP280.h"
 #include <EEPROM.h>
 #include <stdio.h>
 #include "./libs/Time/Time.h"
@@ -230,7 +231,7 @@ unsigned long console_interval = 250;             	//  Check console for input e
 unsigned long esp8266_interval = 100;			//  Check for input from esp8266 on Serial 1  
 unsigned long led_update_interval = 200;          	//  Update the LED's every 200 miliseconds
 unsigned long nmea_update_interval = 100;         	//  Update NMEA serial-in line every 1/10 of a second
-unsigned long hsnmea_update_interval = 100;		//  Update HS NMEA (SoftwareSerial based) every 1/10 of a second 
+unsigned long hsnmea_update_interval = 50;		//  Update HS NMEA (SoftwareSerial based) every 1/20 of a second 
 unsigned long hardware_watchdog_interval = 120000; 	//  Do a hardware reset if we don't pat the dog every 2 minutes
 unsigned long nmea_sample_interval = 30000;		//  Nuke nmea data older than 30 seconds
   
@@ -275,6 +276,8 @@ bool currently_active = true;
 */
 
 Adafruit_BMP085 bmp;
+Adafruit_BMP280 bmp280;
+bool using_bmp280 = false;
 #define BARO_HISTORY_LENGTH 10
 #define TEMPERATURE_BIAS 5	//  degrees F that BMP, on average, over reports temperature by
 float temperature;
@@ -369,7 +372,15 @@ void print_free_memory()
 
 void bmp_setup()
 {
-  bmp.begin();
+  if(bmp280.begin())
+  {
+    using_bmp280 = true;
+  }
+  else
+  {
+    using_bmp280 = false;
+    bmp.begin();
+  }
   for(i = 0; i < BARO_HISTORY_LENGTH; i++)
   {
     pressure_history[i] = 0.0;
@@ -814,7 +825,14 @@ void bmp_read()
     temperature_history[i] = temperature_history[i+1];
   }
 
-  temperature_history[BARO_HISTORY_LENGTH - 1] = (1.8 * bmp.readTemperature()) + 32 - TEMPERATURE_BIAS ;
+  if(using_bmp280)
+  {
+    temperature_history[BARO_HISTORY_LENGTH - 1] = (1.8 * bmp280.readTemperature()) + 32 - TEMPERATURE_BIAS ;
+  }
+  else
+  {
+    temperature_history[BARO_HISTORY_LENGTH - 1] = (1.8 * bmp.readTemperature()) + 32 - TEMPERATURE_BIAS ;
+  }
 
   if(handy > 0)
   {
@@ -852,7 +870,15 @@ void bmp_read()
     }
     pressure_history[i] = pressure_history[i+1];
   }
-  pressure_history[BARO_HISTORY_LENGTH - 1] = bmp.readPressure() * 0.000295300;
+
+  if(using_bmp280)
+  {
+    pressure_history[BARO_HISTORY_LENGTH - 1] = bmp280.readPressure() * 0.000295300;
+  }
+  else
+  {
+    pressure_history[BARO_HISTORY_LENGTH - 1] = bmp.readPressure() * 0.000295300;
+  }
 
   if(handy > 0)
   {
@@ -1987,7 +2013,8 @@ void parse_nmea_sentence()
 
 void update_nmea()
 {
-  while(Serial2.available() && (int) nmea_read_buffer.length() < MAX_NMEA_BUFFER)
+  bool keep_going = true;
+  while(Serial2.available() && (int) nmea_read_buffer.length() < MAX_NMEA_BUFFER && keep_going == true)
   {
      int incoming_byte = Serial2.read();
      if(incoming_byte == '\n')
@@ -1998,6 +2025,7 @@ void update_nmea()
          parse_nmea_sentence();
        }
        nmea_read_buffer = "";
+       keep_going = false;
      }
      else if (incoming_byte == '\r')
      {
@@ -2017,7 +2045,8 @@ void update_nmea()
 
 void update_hsnmea()
 {
-  while(soft_serial.available() && (int) hsnmea_read_buffer.length() < MAX_NMEA_BUFFER)
+  bool keep_going = true;
+  while(soft_serial.available() && (int) hsnmea_read_buffer.length() < MAX_NMEA_BUFFER && keep_going == true)
   {
     int incoming_byte = soft_serial.read();
     if(incoming_byte == '\n')
@@ -2036,6 +2065,7 @@ void update_hsnmea()
       }
       #endif
       hsnmea_read_buffer = "";
+      keep_going = false;
     }
     else if (incoming_byte == '\r')
     {
