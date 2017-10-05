@@ -1614,13 +1614,13 @@ void report_state(bool console_only)
     new_message += gps_siv;
   }
 
-  possibly_append_data(battery_one, 0.2, F(",V1:"));
-  possibly_append_data(battery_two, 0.2, F(",V2:"));
-  possibly_append_data(battery_three, 0.2, F(",V3:"));
+  possibly_append_data(battery_one, 1.0, F(",V1:"));
+  possibly_append_data(battery_two, 1.0, F(",V2:"));
+  possibly_append_data(battery_three, 1.0, F(",V3:"));
 
-  possibly_append_data(charger_one, 0.2, F(",C1:"));
-  possibly_append_data(charger_two, 0.2, F(",C2:"));
-  possibly_append_data(charger_three, 0.2, F(",C3:"));
+  possibly_append_data(charger_one, 1.0, F(",C1:"));
+  possibly_append_data(charger_two, 1.0, F(",C2:"));
+  possibly_append_data(charger_three, 1.0, F(",C3:"));
 
   //
   //	Add NMEA data
@@ -1722,7 +1722,7 @@ void parse_console()
 {
   //
   // We could evesdrop here if we wanted to, but currently do not.  Just
-  // push all input up the esp8266 on Serial1.
+  // push all input up to the esp8266 on Serial1.
   //
 
   Serial1.println(console_read_buffer);
