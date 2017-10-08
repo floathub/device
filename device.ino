@@ -4,6 +4,10 @@
  (c) 2011-2017 Modiot Labs
  (begun June 6, 2011)
 
+  September, 2017
+
+  Better NMEA and HS-NMEA parsing, plus NMEA by default on wired-USB port
+
 
   December, 2016
 
@@ -127,6 +131,7 @@
   Compile time option/debug flags
 */
 
+//#define CONSOLE_DEBUG_ON
 //#define GPS_DEBUG_ON
 //#define PUMP_DEBUG_ON
 //#define EXECUTION_PATH_DEBUG_ON
@@ -168,6 +173,7 @@ byte cipher[MAX_AES_CIPHER_LENGTH];
 String          float_hub_id;			// default: factoryX
 byte            float_hub_aes_key[16]; 
 bool	        currently_connected = false;
+bool	        console_mode;
 unsigned long   boot_counter;			
 boolean         led_state = false;              //  For cycling on and off  
 #define		ESP8266_SERIAL_READY_PIN 2	//  ESP8266 sets this HIGH to say it is ready for more serial data
@@ -608,6 +614,15 @@ void setup()
   a_string.reserve(MAX_LATEST_MESSAGE_SIZE);
 
   //
+  //  Do we put out FHA/FHB/FHC messages on the console?
+  //
+
+  console_mode = false;
+  #ifdef CONSOLE_DEBUG_ON
+  console_mode = true;
+  #endif
+
+  //
   //  Serial1 is the ESP8266 (WiFi chip)
   //
 
@@ -714,8 +729,11 @@ void setup()
   //  Announce we are up
   //
   
-  help_info(F("Up and running..."));
-  display_current_variables();  
+  if(console_mode)
+  {
+    help_info(F("Up and running..."));
+    display_current_variables();  
+  }
 }
 
 
@@ -787,6 +805,10 @@ void add_checksum_and_send_nmea_string(String nmea_string)
   }
   nmea_string += checksum;
 
+  if(console_mode == false)
+  {
+    Serial.println(nmea_string);
+  }
   Serial2.println(nmea_string);
 
   if(esp8266IsReady())
@@ -1238,6 +1260,10 @@ void parse_gps_buffer_as_gga()
 
 void push_hsnmea_only_to_esp8266()
 {
+  if(console_mode == false)
+  {
+    Serial.println(hsnmea_read_buffer);
+  }
   if(!esp8266IsReady())
   {
     #ifdef SERIAL_DEBUG_ON
@@ -1275,10 +1301,18 @@ void push_out_nmea_sentence(bool from_nmea_in)
 
   if(from_nmea_in)
   {
+    if(console_mode == false)
+    {
+      Serial.println(nmea_read_buffer);
+    }
     Serial2.println(nmea_read_buffer);
   }
   else
   {
+    if(console_mode == false)
+    {
+      Serial.println(gps_read_buffer);
+    }
     Serial2.println(gps_read_buffer);
   }
 }
@@ -1328,7 +1362,7 @@ bool validate_nmea_buffer(bool hsnmea = false)
   if(hsnmea)
   {
     int start_point = hsnmea_read_buffer.indexOf('!');
-    if(start_point < 2)
+    if(start_point < 0)
     {
       start_point = hsnmea_read_buffer.indexOf('$');
     }
@@ -1360,12 +1394,14 @@ bool validate_nmea_buffer(bool hsnmea = false)
       return true;
     }
   }
-  #ifdef NMEA_DEBUG_ON
+  #ifdef SOFTSERIAL_DEBUG_ON
   if(hsnmea)
   {
-    debug_info(String(F("Bad NMEA buffer: ")) + hsnmea_read_buffer + ", Wanted: " + a_string);
+    debug_info(String(F("Bad HSNMEA buffer: ")) + hsnmea_read_buffer + ", Wanted: " + a_string);
   }
-  else
+  #endif
+  #ifdef NMEA_DEBUG_ON
+  if(!hsnmea)
   {
     debug_info(String(F("Bad NMEA buffer: ")) + nmea_read_buffer + ", Wanted: " + a_string);
   }
@@ -1565,7 +1601,14 @@ void report_state(bool console_only)
 {
   if(console_only)
   {
-    new_message = F("$FHC:");
+    if(console_mode)
+    {
+      new_message = F("$FHC:");
+    }
+    else
+    {
+      return;
+    }
   }
   else
   {
@@ -1721,11 +1764,27 @@ void parse_esp8266()
 void parse_console()
 {
   //
-  // We could evesdrop here if we wanted to, but currently do not.  Just
-  // push all input up to the esp8266 on Serial1.
+  // We could evesdrop here if we wanted to, but currently do not other than
+  // to check for "cons", "nmea", of "factory" message.  Push all other
+  // input up to the esp8266 on Serial1.
   //
 
-  Serial1.println(console_read_buffer);
+  if(console_read_buffer == "cons")
+  {
+    console_mode = true;
+  }
+  else if(console_read_buffer == "nmea")
+  {
+    console_mode = false;
+  }
+  else if(console_read_buffer == "factory")
+  {
+    factoryReset();
+  }
+  else
+  {
+    Serial1.println(console_read_buffer);
+  }
 
 }  
 
@@ -1786,7 +1845,10 @@ void console_read()
 
 void echo_info(String some_info)
 {
-  Serial.println(some_info);
+  if(console_mode)
+  {
+    Serial.println(some_info);
+  }
 }
 
 
@@ -2009,6 +2071,26 @@ void parse_nmea_sentence()
   }
 }
 
+void parse_hsnmea_sentence()
+{
+
+  //
+  // We don't parse actual AIS !AIVDM type sentences, _but_ if we are
+  // getting regular NMEA data over the HS port (probably from a
+  // multiplexer), so will try and parse that by quickly swapping out the
+  // regular NMEA buffer
+  //
+
+  if(hsnmea_read_buffer.indexOf('$') == 0)
+  {
+    a_string = nmea_read_buffer;
+    nmea_read_buffer = hsnmea_read_buffer;
+    parse_nmea_sentence();
+    nmea_read_buffer = a_string; 
+  }
+
+
+}
 
 void update_nmea()
 {
@@ -2055,7 +2137,8 @@ void update_hsnmea()
         #ifdef SOFTSERIAL_DEBUG_ON
         debug_info("SoftSer good: " + String(hsnmea_read_buffer));
         #endif
-        push_hsnmea_only_to_esp8266();   //   We just push out HS NMEA (AIS), we do _not_ parse any of it
+        push_hsnmea_only_to_esp8266();   
+        parse_hsnmea_sentence();
       }
       #ifdef SOFTSERIAL_DEBUG_ON
       else
