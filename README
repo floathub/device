@@ -40,3 +40,18 @@ should have the RX buffer changed from 64 bytes to 128 bytes as in:
   #define _SS_MAX_RX_BUFF 128 // RX buffer size
 
 
+
+ESP8266 Libraries
+-----------------
+
+The only verified version of the ESP8266 Board library for the Arduino
+environment currently reccommended is 2.3.0. Versions 2.4.0 and 2.4.1 have
+been tested and are know _NOT_ to work reliably (especially with
+(re-)joining public WiFi automatically after a disconnect).
+
+
+
+Konekt/Hologram Dash Libraries
+------------------------------
+
+Built and tested with 0.11.1, which is the reccommended version.

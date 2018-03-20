@@ -20,6 +20,36 @@
 
 */
 
+//
+//	Debugging options
+//
+
+//#define HTTP_DEBUG_ON
+//#define MDNS_DEBUG_ON
+//#define STAT_DEBUG_ON
+//#define INPT_DEBUG_ON
+//#define WIFI_DEBUG_ON
+//#define FILE_DEBUG_ON
+//#define FILE_SERVE_ON	// Useful when debuggig to see SPIFF files from a browser
+//#define CELL_DEBUG_ON
+
+//
+//  Have to have a separate string for cellular debugging as cellular stuff
+// is called on an interrupt so we can'd directly print stuff out
+// (especially over virtual serial) during the interrupt call
+//
+
+#ifdef CELL_DEBUG_ON
+String cellular_debug_string;
+#endif
+
+//
+//  Global defines
+//
+
+#define MAX_COOKIES 10
+#define CELLULAR_CODE_ON	
+
 
 
 #include <ESP8266WiFi.h>
@@ -27,6 +57,10 @@
 #include <ESP8266mDNS.h>
 #include <EEPROM.h>
 #include <FS.h>
+#ifdef CELLULAR_CODE_ON
+#include "./libs/SPISlave/SPISlave.h"
+//#include <SPISlave.h>
+#endif
 #include "static.h"
 #include "version_defines.h"
 
@@ -49,31 +83,15 @@ extern "C" {
 
 
 //
-//	Debugging options
-//
-
-//#define HTTP_DEBUG_ON
-//#define MDNS_DEBUG_ON
-//#define STAT_DEBUG_ON
-//#define INPT_DEBUG_ON
-//#define WIFI_DEBUG_ON
-//#define FILE_DEBUG_ON
-//#define FILE_SERVE_ON	// Useful when debuggig to see SPIFF files from a browser
-
-//
-//  Global defines
-//
-
-#define MAX_COOKIES 10
-
-
-//
-//  User settable values (anything in this list can be changed via the web interface
+//  User settable values (almost anything in this list can be changed via the web interface
 // or the cli)
 //
 
 
+//
 //	Wireless Related
+//
+
 String public_wifi_ssid;
 String public_wifi_password;
 String private_wifi_ssid;
@@ -88,12 +106,16 @@ IPAddress public_static_mask;
 IPAddress public_static_dns;
 
 
+//
 //	Account Related 
+//
 
 String        float_hub_id;			// default: factoryX
 byte          float_hub_aes_key[16]; 
 
+//
 //	Other Settings
+//
 
 bool	nmea_mux_on;				// default: yes
 bool    nmea_mux_private;			// default: no
@@ -102,7 +124,9 @@ String	web_interface_username;			// default: floathub
 String	web_interface_password;			// default: floathub
 
 
+//
 //	Advanced (hidden) settings
+//
 
 bool	      phone_home_on;			// default: yes
 String        float_hub_server;			// default: fdr.floathub.net
@@ -139,6 +163,16 @@ long unsigned int low_file_pointer;
 long unsigned int high_file_pointer;
 #define MIN_SPIFF_SPACE	4096
 
+//
+//  Cellular status
+//
+#ifdef CELLULAR_CODE_ON
+bool cellular_link_up = 0;
+bool cellular_link_ready = 0;
+String cellular_provider;
+String sim_card_number;
+String latest_cellular_message_to_send = "";
+#endif
 
 //
 //	Struct to hold our authentication cookies
@@ -189,10 +223,11 @@ unsigned long network_previous_timestamp = 0;
 // Servers of many types and size for such a small little microprocessor :-)
 //
 
+#define NUMB_NMEA_CLIENTS 4
 
 ESP8266WebServer  web_server ( 80 );
 WiFiServer       *nmea_server = 0;
-WiFiClient        nmea_client[4];
+WiFiClient        nmea_client[NUMB_NMEA_CLIENTS];
 WiFiServer	 *virtual_serial_server = 0;
 WiFiClient	  virtual_serial_client;
 unsigned long     expected_fdr_response_time;
@@ -214,7 +249,8 @@ String	virtual_serial_read_buffer;
 //
 
 unsigned watchdog_timestamp;
-#define  WATCHDOG_TIME_LIMIT 21600000UL	// If we do not manage to get any data through to FDR after 6 hours, reboot the whole shebang 
+#define  WATCHDOG_TIME_LIMIT 21600000UL		    // If we do not manage to get any data through to FDR after 6 hours, reboot the whole shebang 
+#define  WATCHDOG_USE_CELLULAR_TIME_LIMIT 720000UL  // If WiFi is connected, but we have not been able to send any data for at least 12 minutes, use cellular data if available 
 
 
 void help_info(String some_info)
@@ -226,7 +262,7 @@ void help_info(String some_info)
   Serial.print(F("$    "));
   Serial.println(some_info);
 
-  if(virtual_serial_client && virtual_serial_client.connected())
+  if(virtual_serial_client.connected())
   {
     virtual_serial_client.print(F("$FHH:"));
     virtual_serial_client.print(float_hub_id);
@@ -235,6 +271,7 @@ void help_info(String some_info)
     virtual_serial_client.print(F("$    "));
     virtual_serial_client.println(some_info);
   }
+
 }
 
 void internal_info(String some_info)
@@ -264,7 +301,8 @@ void debug_info_core(String some_info)
   Serial.print(FLOATHUB_PROTOCOL_VERSION);
   Serial.print(F("$    "));
   Serial.print(some_info);
-  if(virtual_serial_client && virtual_serial_client.connected())
+
+  if(virtual_serial_client.connected())
   {
     virtual_serial_client.print(F("$FHD:"));
     virtual_serial_client.print(float_hub_id);
@@ -279,7 +317,7 @@ void debug_info(String some_info)
 {
   debug_info_core(some_info);
   Serial.println();
-  if(virtual_serial_client && virtual_serial_client.connected())
+  if(virtual_serial_client.connected())
   {
     virtual_serial_client.println();
   }
@@ -289,7 +327,8 @@ void debug_info(String some_info, float x)
 {
   debug_info_core(some_info);
   Serial.println(x);
-  if(virtual_serial_client && virtual_serial_client.connected())
+
+  if(virtual_serial_client.connected())
   {
     virtual_serial_client.println(x);
   }
@@ -300,7 +339,8 @@ void debug_info(String some_info, int x)
 {
   debug_info_core(some_info);
   Serial.println(x);
-  if(virtual_serial_client && virtual_serial_client.connected())
+
+  if(virtual_serial_client.connected())
   {
     virtual_serial_client.println(x);
   }
@@ -810,8 +850,7 @@ bool isOnPrivateNetwork()
 
 void nukeNmeaServer()
 {
-
-  for(int i = 0; i < 4; i++)
+  for(int i = 0; i < NUMB_NMEA_CLIENTS; i++)
   {
     if(nmea_client[i])
     {
@@ -824,7 +863,6 @@ void nukeNmeaServer()
     delete nmea_server;
     nmea_server = 0;	
   }
-
 }
 
 
@@ -841,12 +879,12 @@ void fireUpNmeaServer()
   }
   nmea_server->begin();
   nmea_server->setNoDelay(true);
-
 }
 
 
 void kickNMEA()
 {
+
   if(nmea_mux_on)
   {
     fireUpNmeaServer();
@@ -855,34 +893,31 @@ void kickNMEA()
   {
     nukeNmeaServer();
   }
+
 }
 
 
 void nukeVirtualSerialServer()
 {
-
-  if(virtual_serial_client)
+  if(virtual_serial_client.connected())
   {
-    virtual_serial_client.stop();
+      virtual_serial_client.stop();
   }
   if(virtual_serial_server)
   {
     virtual_serial_server->close();
     delete virtual_serial_server;
-    virtual_serial_server = 0;	
   }
-
+  virtual_serial_server = 0;	
 }
 
 
 void fireUpVirtualSerialServer()
 {
-
   nukeVirtualSerialServer();
   virtual_serial_server = new WiFiServer(virtual_serial_port);
   virtual_serial_server->begin();
   virtual_serial_server->setNoDelay(true);
-
 }
 
 
@@ -1084,6 +1119,8 @@ void handleRoot()
   {
     page += "<h5><a href='http://" + public_address + "'>" + public_address + "</a> | <a href='http://" + mdns_name + ".local'>" + mdns_name + ".local</a> | " + private_address + "</h5>";
   }
+
+
   page += FPSTR(HTTP_DIV_B);
   page += "<h2>Device Settings</h2>";
 
@@ -1104,6 +1141,20 @@ void handleRoot()
   page += "<button type='submit' name='DISCONNECT'>Logout</button></form>";
 
   page += "</div>";
+
+  #ifdef CELLULAR_CODE_ON
+  if(cellular_link_up)
+  {
+    page += "<br/><h5>Up | ";
+  }
+  else
+  {
+    page += "<br/><h5>Down | ";
+  }
+  page += cellular_provider + " | " + sim_card_number + "</h5>";
+  #endif
+
+
   page += FPSTR(HTTP_CLOSE);
 
   web_server.send ( 200, "text/html", page );
@@ -1986,6 +2037,13 @@ void displayCurrentVariables()
   help_info(String(F("AP-IP: ")) + WiFi.softAPIP().toString()); 
   help_info(String(F("WiFi-IP: ")) + WiFi.localIP().toString()); 
 
+  
+  #ifdef CELLULAR_CODE_ON
+  help_info(String(F("Cell: ")) + cellular_link_up); 
+  help_info(String(F("Name: ")) + cellular_provider); 
+  help_info(String(F("Sim: ")) + sim_card_number); 
+  #endif
+
 }
 
 
@@ -2147,6 +2205,114 @@ void popMessageQueue()
 }
 
 
+
+#ifdef CELLULAR_CODE_ON
+
+
+void cellular_callback(uint8_t * data, size_t len)
+{
+  //
+  // We have received this message, describing the status of the cellular
+  // modem
+  //	
+
+  String message = String((char *)data);
+  #ifdef CELL_DEBUG_ON
+  cellular_debug_string = String(F("Cell in: ")) + message;
+  #endif
+
+
+  //
+  // The message can be anything like:
+  //
+  //	"LU T-Mobile" = Link Up, provider is tmobile
+  //	"LR AT&T"     = Link good, waiting for more to add to current message
+  //    "LQ Orange"   = Link good, but message still in queue
+  //    "NL"          = No Link
+  //
+  // 
+  // For user feedback, nice to know state of cellular connection, which is
+  // good as long as first character of message is an L
+  // 
+
+  if(message.length() > 1 && message.charAt(0) == 'L')
+  {
+    cellular_link_up = true;
+    if(message.length() > 3)
+    {
+      sim_card_number = message.substring(3, message.indexOf(' ', 3));
+      cellular_provider = message.substring(message.indexOf(' ', 3) + 1);
+    }
+    else
+    {
+      cellular_provider = F("Unknown");
+      sim_card_number = F("Unknown");
+    }
+    if(message.length() > 2 && message.charAt(1) == 'U')
+    {
+      cellular_link_ready = true;
+    }
+    else
+    {
+      cellular_link_ready = false;
+    }
+  }
+  else
+  {
+    cellular_link_up = false;
+    cellular_link_ready = false;
+    cellular_provider = F("None");
+    sim_card_number = F("None");
+    SPISlave.setData("");
+    return;
+  }
+
+  //
+  // Still here? Then we want to use cellular data if we can
+  //
+
+  if(latest_cellular_message_to_send.length() > 0)
+  {
+    if(latest_cellular_message_to_send.length() > 32)
+    {
+      String sub_message = latest_cellular_message_to_send.substring(0,32);
+      SPISlave.setData(sub_message.c_str());
+      latest_cellular_message_to_send = latest_cellular_message_to_send.substring(32);
+    }
+    else
+    {
+      SPISlave.setData(latest_cellular_message_to_send.c_str());
+      latest_cellular_message_to_send = "";
+    }
+  }
+  else
+  {
+    SPISlave.setData("");
+  }
+}
+
+void setup_spi_slave_to_cellular()
+{
+
+  //
+  // Every 4 seconds, we get a message from the DASH/Cellular modem (running
+  // as SPI Master) that informs us of it's status. We handle that incoming
+  // data (called on an interrupt) with this function:
+  //
+
+  SPISlave.onData(cellular_callback);
+
+  //
+  // Call library setup, set our own flag
+  //
+
+  SPISlave.begin();
+  cellular_link_up = false;
+  cellular_provider = F("Unknown");
+}
+
+#endif
+
 void setupFileSystem()
 {
   SPIFFS.begin();
@@ -2168,6 +2334,7 @@ void setupFileSystem()
   filesystem_is_working = true;
 
   showFileList();
+
 }
 
 
@@ -2184,6 +2351,11 @@ void setup(void)
   wifi_read_buffer.reserve(MAX_WIFI_READ_BUFFER_SIZE);
   latest_message_to_send = "";
   wifi_read_buffer = "";
+  #ifdef CELL_DEBUG_ON
+  cellular_debug_string.reserve(MAX_LATEST_MESSAGE_SIZE);
+  cellular_debug_string = "";
+  #endif
+
 
 
   //
@@ -2301,6 +2473,16 @@ void setup(void)
   //
 
   watchdog_timestamp = millis();
+
+
+  //
+  //  If we are celullar, need to set up some SPI Slave methods
+  //
+  #ifdef CELLULAR_CODE_ON
+  setup_spi_slave_to_cellular();
+  latest_cellular_message_to_send.reserve(MAX_LATEST_MESSAGE_SIZE);
+  latest_cellular_message_to_send = "";
+  #endif
 }
 
 
@@ -2308,7 +2490,7 @@ void echoNMEA(String a_message)
 {
   if(nmea_mux_on)
   {
-    for(int i = 0; i < 4; i++)
+    for(int i = 0; i < NUMB_NMEA_CLIENTS; i++)
     {
       if(nmea_client[i])
       {
@@ -2496,7 +2678,6 @@ void queueMessage(String a_message)
 
 void nmeaHouseKeeping()
 {
-
   if(!nmea_server || !nmea_mux_on )
   {
     return;
@@ -2535,7 +2716,6 @@ void nmeaHouseKeeping()
     nmea_client[i].stop();
     nmea_client[i] = nmea_server->available();
   }
-
 }
 
 
@@ -3343,17 +3523,29 @@ void heartbeatHouseKeeping()
     }
     internal_info(String(F("c=")) + public_wifi_status);
   }
+
+  #ifdef CELLULAR_CODE_ON
+  else if(heartbeat_cycle == 3)
+  {
+    internal_info(String(F("d=")) + cellular_link_up); 
+  }
+  heartbeat_cycle++;
+  if(heartbeat_cycle >=4)
+  {
+    heartbeat_cycle = 0;
+  }
+  #else
   heartbeat_cycle++;
   if(heartbeat_cycle >=3)
   {
     heartbeat_cycle = 0;
   }
+  #endif
 }
 
 
 void fdrHouseKeeping()
 {
-
   if(WiFi.status() == WL_CONNECTED && WiFi.localIP() > 0)
   {
     if(!called_mdns_after_connection)
@@ -3489,6 +3681,49 @@ void fdrHouseKeeping()
   else
   {
     called_mdns_after_connection = false;
+
+    //
+    //  If we have cellular, and 
+    //
+
+    #ifdef CELLULAR_CODE_ON
+    if (
+        millis() - watchdog_timestamp > WATCHDOG_USE_CELLULAR_TIME_LIMIT &&
+	cellular_link_up == true &&
+	cellular_link_ready == true &&
+        phone_home_on == true &&
+        latest_message_to_send.length() > 0 &&
+        latest_cellular_message_to_send.length() == 0
+       )
+    {
+      debug_info(F("Using cellular for message"));
+      latest_cellular_message_to_send = latest_message_to_send + "\r\n";
+      latest_message_to_send = "";
+
+      if(latest_message_from_file)
+      {
+        if(low_file_pointer > 0)
+        {
+          if(!nukeOldestFile())
+          {
+	    #ifdef FILE_DEBUG_ON
+            debug_info(F("HouseK failed to Nuke, BAD"));
+            #endif
+            initFileSystem();
+            low_file_pointer = 0;
+            high_file_pointer = 0;
+          }
+          else if(low_file_pointer > high_file_pointer)
+          {
+	    // We have emptied the queue ..
+            low_file_pointer = 0;
+            high_file_pointer = 0;
+	  }
+        }
+      }
+      popMessageQueue();
+    }
+    #endif
   }
 }
 
@@ -3536,6 +3771,21 @@ void readConsole()
     console_read_buffer = "";
   }
   signalBusy();
+
+  //
+  // We are here frequently, but outside of interrupts, so if there happens
+  // to be some cellular debugging output, show it
+  //
+
+  #ifdef CELL_DEBUG_ON
+  if(cellular_debug_string.length() > 0)
+  {
+    debug_info(cellular_debug_string);
+    cellular_debug_string = "";
+  }
+  #endif
+
+  
 }
 
 
