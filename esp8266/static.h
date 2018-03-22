@@ -1,7 +1,7 @@
 /*
 
  FloatHub Static Elements
- (c) 2015-2017 Modiot Labs
+ (c) 2015-2018 Modiot Labs
  
  Note that this file is _not_ licensed MIT like the actual code.
 

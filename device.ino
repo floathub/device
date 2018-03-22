@@ -1,8 +1,14 @@
 /*
 
  FloatHub Arduino Code
- (c) 2011-2017 Modiot Labs
+ (c) 2011-2018 Modiot Labs
  (begun June 6, 2011)
+
+
+  January-March 2018
+
+  Celullar communications via Hologram DASH and AIS relaying to fdr server.
+
 
   September, 2017
 

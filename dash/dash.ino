@@ -1,12 +1,11 @@
 /*
 
   FloatHub Arduino Code
-  (c) 2011-2017 Modiot Labs
+  (c) 2011-2018 Modiot Labs
 
   DASH Code to send messages from ESP8266 out via cellular link
-  Note that contrary to what you might think, the DASH is the _MASTER_
+  Note that contrary to what you might think, the DASH is the SPI _MASTER_
 
-  Begin in Guinea in March, 2018
  
 */
 
@@ -44,6 +43,14 @@ unsigned long simulated_sending_timestamp = 0;
 
 String network_operator;
 String sim_card_number;
+
+/*
+
+
+Currently commented out as SPI back and forth between DASH <--> ESP8266
+seems veery reliable and so this is needless overhead. Plus even if we found
+something wrong, there is currently no mechanism for the DASH to do anything
+about it
 
 
 bool check_message()
@@ -85,6 +92,7 @@ bool check_message()
 
   return true;
 }
+*/
 
 void try_to_send()
 {
@@ -218,14 +226,7 @@ void send_SPI_message(const char * message)
       }
       else
       {
-        if(check_message())
-        {
-          try_to_send();
-        }
-        else
-        {
-          latest_cellular_message_to_send = "";
-        }
+        try_to_send();
       }
     }
   }

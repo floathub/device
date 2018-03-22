@@ -1,7 +1,7 @@
 /*
 
  FloatHub ESP8266 Code
- (c) 2015-2017 Modiot Labs
+ (c) 2015-2018 Modiot Labs
  
 */
 
@@ -32,6 +32,7 @@
 //#define FILE_DEBUG_ON
 //#define FILE_SERVE_ON	// Useful when debuggig to see SPIFF files from a browser
 //#define CELL_DEBUG_ON
+#define AISR_DEBUG_ON
 
 //
 //  Have to have a separate string for cellular debugging as cellular stuff
@@ -51,18 +52,33 @@ String cellular_debug_string;
 #define CELLULAR_CODE_ON	
 
 
-
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
 #include <ESP8266mDNS.h>
 #include <EEPROM.h>
 #include <FS.h>
-#ifdef CELLULAR_CODE_ON
-#include "./libs/SPISlave/SPISlave.h"
-//#include <SPISlave.h>
-#endif
+#include "./libs/AES/AES.h"
+#include "./libs/Base64/Base64.h"
 #include "static.h"
 #include "version_defines.h"
+
+#ifdef CELLULAR_CODE_ON
+#include "./libs/SPISlave/SPISlave.h"
+#endif
+
+
+//
+// When we do AES encryption (to relay AIS data)
+//
+
+#define MAX_AES_CIPHER_LENGTH 800
+AES aes;
+byte iv[16];
+byte volatile_iv[16];
+byte plain_text[MAX_AES_CIPHER_LENGTH];
+byte cipher_text[MAX_AES_CIPHER_LENGTH];
+
+
 
 //
 //	Need access to lower level calls to be able to turn DHCP on and off
@@ -119,6 +135,7 @@ byte          float_hub_aes_key[16];
 
 bool	nmea_mux_on;				// default: yes
 bool    nmea_mux_private;			// default: no
+bool    relay_ais_data;				// default: yes
 unsigned int  nmea_mux_port;			// default: 2319
 String	web_interface_username;			// default: floathub
 String	web_interface_password;			// default: floathub
@@ -524,13 +541,14 @@ void init_eeprom_memory()
 
 
   //
-  // NMEA muxer flag, port of 2319, private
+  // NMEA muxer flag, port of 2319, private, ais relay
   //
 
   EEPROM.write(251, 1);
   EEPROM.write(252, 9);
   EEPROM.write(253, 15);
   EEPROM.write(324, 0);
+  EEPROM.write(325, 1);
  
   //
   // Web interface username and password
@@ -650,6 +668,7 @@ void write_eeprom_memory()
   EEPROM.write(252, highByte(nmea_mux_port));
   EEPROM.write(253, lowByte(nmea_mux_port));
   EEPROM.write(324, nmea_mux_private);
+  EEPROM.write(325, relay_ais_data);
  
   //
   // Web interface username and password
@@ -777,6 +796,7 @@ void read_eeprom_memory()
   nmea_mux_port  = EEPROM.read(253);
   nmea_mux_port += EEPROM.read(252) * 256;
   nmea_mux_private = EEPROM.read(324);
+  relay_ais_data = EEPROM.read(325);
   
   //
   //  Phone home?
@@ -1578,6 +1598,17 @@ void handleOther()
       nmea_changed = true; 
     }
 
+    if(web_server.arg("relayais") == "yes" && !relay_ais_data)
+    {
+      relay_ais_data = true;
+      something_changed = true;
+    }
+    else if(relay_ais_data && web_server.arg("relayais") != "yes")
+    {
+      relay_ais_data = false;
+      something_changed = true;
+    }
+
     if(nmea_mux_port != web_server.arg("muxport").toInt())
     {
       nmea_mux_port = web_server.arg("muxport").toInt();
@@ -1640,6 +1671,13 @@ void handleOther()
   page += "<label for='muxprivate'>Only Private NMEA: </label>";
   page += "<input type='checkbox' name='muxprivate' value='yes'";
   if(nmea_mux_private)
+  {
+    page += " checked";
+  }
+  page += "><br>";
+  page += "<label for='relayais'>Relay AIS: </label>";
+  page += "<input type='checkbox' name='relayais' value='yes'";
+  if(relay_ais_data)
   {
     page += " checked";
   }
@@ -2028,6 +2066,7 @@ void displayCurrentVariables()
   help_info(String(F("N=")) + nmea_mux_on); 
   help_info(String(F("n=")) + nmea_mux_port); 
   help_info(String(F("e=")) + nmea_mux_private); 
+  help_info(String(F("r=")) + relay_ais_data); 
   help_info(String(F("u=")) + web_interface_username); 
   help_info(String(F("U=")) + web_interface_password); 
   help_info(String(F("P=")) + phone_home_on); 
@@ -2486,8 +2525,40 @@ void setup(void)
 }
 
 
+bool openFdr()
+{
+
+
+  // Open a connection to the FloatHub Data Receiver server (usually fdr.floathub.net)
+
+  #ifdef WIFI_DEBUG_ON
+  debug_info(F("Opening fdr socket ..."));
+  #endif
+  if(fdr_client.connect(float_hub_server.c_str(), float_hub_server_port))
+  {
+    
+    fdr_client.setNoDelay(true);
+    #ifdef WIFI_DEBUG_ON
+    debug_info(F("Success "));
+    #endif
+    return true;
+  }
+  else
+  {
+    #ifdef WIFI_DEBUG_ON
+    debug_info(F("Failure "));
+    #endif
+  }
+
+  return false;
+}
+
+
+
 void echoNMEA(String a_message)
 {
+  int how_many; 
+
   if(nmea_mux_on)
   {
     for(int i = 0; i < NUMB_NMEA_CLIENTS; i++)
@@ -2497,6 +2568,147 @@ void echoNMEA(String a_message)
         nmea_client[i].println(a_message);
       }
     }
+  }
+
+  //
+  // If we're phoning home AND relay AIS is set on AND this looks like AIS,
+  // and we're not backed up with regular messages, send pretty much a raw
+  // AIS string up to the fdr server
+  //
+
+  if(
+      WiFi.status() == WL_CONNECTED  &&
+      phone_home_on == true          &&
+      relay_ais_data == true         &&
+      low_file_pointer < 10	     &&
+      high_file_pointer < 10         &&
+      a_message.indexOf('!') == 0    &&
+      (
+        a_message.indexOf('A') == 1  ||
+        a_message.indexOf('B') == 1  ||
+        a_message.indexOf('S') == 1  
+      )
+     )
+  {
+    String string_to_send = F("$FHO:");
+    string_to_send += float_hub_id + ":" ;
+    string_to_send += String(FLOATHUB_PROTOCOL_VERSION) + "$,";
+    string_to_send += a_message;
+
+    #ifdef AISR_DEBUG_ON
+    debug_info(String("AIS relay: ") + string_to_send);
+    #endif
+
+    //
+    // We have to encode and markup as FHS 
+    //
+
+    int i = 0;
+    unsigned int cipher_length, base64_length;
+    aes.set_key (float_hub_aes_key, 128) ;
+    for(i = 0; i < 16; i++)
+    {
+      iv[i] = random(0, 256);
+      volatile_iv[i] = iv[i];
+    }
+
+    for(i = 0; i < string_to_send.length(); i++)
+    {
+      plain_text[i] = string_to_send.charAt(i);
+    }
+    cipher_length = i;
+
+    //
+    //  AES encrypted messages should end on a 16 byte (128 bit) boundary
+    //
+
+    if(cipher_length % 16 == 0)
+    {
+      for(i = 0; i < 16; i++)
+      {
+        plain_text[cipher_length + i] = 16;
+      }
+      cipher_length += 16;
+    }
+    else
+    {
+      for(i = 0; i < 16 - (cipher_length % 16); i++)
+      {
+        plain_text[cipher_length + i] = 16 - (cipher_length % 16);
+      }
+      cipher_length += i;
+    }
+
+    //
+    //  Now right length, we can encrypt
+    //
+
+    aes.cbc_encrypt (plain_text, cipher_text,  cipher_length / 4, volatile_iv) ;
+
+    //
+    //  Now we reuse the plain text array to store cipher with the
+    //  initialization vector at the beginning
+    //
+
+  
+    for(i = 0; i < 16; i++)
+    {
+      plain_text[i] = iv[i];
+    }
+    for(i = 0; i < cipher_length; i++)
+    {
+      plain_text[16 + i] = cipher_text[i];
+    }
+  
+
+    //
+    //  Now convert that long line of bytes in plain to base 64, recycling the cipher array to hold it
+    //
+  
+    base64_length = base64_encode( (char *) cipher_text, (char *) plain_text, cipher_length + 16);
+    cipher_text[base64_length] = '\0';
+
+    //
+    // Assemble into FHS
+    //
+
+    String fhs_message_to_send = F("$FHS:");
+    fhs_message_to_send += float_hub_id;
+    fhs_message_to_send += F(":");
+    fhs_message_to_send += FLOATHUB_ENCRYPT_VERSION;
+    fhs_message_to_send += F("$,");
+    for(i = 0; i < base64_length; i++)
+    {
+      fhs_message_to_send += (char) cipher_text[i];
+    }
+    fhs_message_to_send += "\r\n";
+
+    #ifdef AISR_DEBUG_ON
+    debug_info(String("AIS FHS: ") + fhs_message_to_send);
+    #endif
+
+    if( openFdr() && fdr_client.connected())
+    {
+      how_many = fdr_client.write(fhs_message_to_send.c_str(), fhs_message_to_send.length());
+      #ifdef AISR_DEBUG_ON
+      if(how_many == fhs_message_to_send.length())
+      {
+        debug_info("AIS relay seemed to all go");
+      }
+      else
+      {
+        debug_info("AIS relay only sent ", how_many);
+      }
+      #endif
+      fdr_client.stop();
+    }
+
+    //
+    //  Clean up?
+    // 
+
+    aes.clean();  //  Not sure if that does anything useful or not.   
+
   }
 }
 
@@ -3152,6 +3364,27 @@ void parseInput(String &the_input)
   }
   #endif
 
+  else if(the_input.startsWith("r=") && the_input.length() >= 3)
+  {        
+    int new_value = the_input.substring(2).toInt();
+    if(the_input[2] == '0' || the_input[2] == '1')
+    { 	
+      processNewFlagValue("r=", relay_ais_data, new_value);
+    }
+    #ifdef INPT_DEBUG_ON
+    else
+    {
+      debug_info(F("Bad boolean"));
+    }
+    #endif
+  }
+  #ifdef INPT_DEBUG_ON
+  else if(the_input.startsWith("r="))
+  {
+    debug_info(F("Short input"));
+  }
+  #endif
+
   else if(the_input.startsWith("n=") && the_input.length() >= 3)
   {
     int new_value = the_input.substring(2).toInt();
@@ -3323,35 +3556,6 @@ void virtualSerialHouseKeeping()
       virtual_serial_read_buffer = "";
     }
   }
-}
-
-
-bool openFdr()
-{
-
-
-  // Open a connection to the FloatHub Data Receiver server (usually fdr.floathub.net)
-
-  #ifdef WIFI_DEBUG_ON
-  debug_info(F("Opening fdr socket ..."));
-  #endif
-  if(fdr_client.connect(float_hub_server.c_str(), float_hub_server_port))
-  {
-    
-    fdr_client.setNoDelay(true);
-    #ifdef WIFI_DEBUG_ON
-    debug_info(F("Success "));
-    #endif
-    return true;
-  }
-  else
-  {
-    #ifdef WIFI_DEBUG_ON
-    debug_info(F("Failure "));
-    #endif
-  }
-
-  return false;
 }
 
 
