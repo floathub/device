@@ -5,7 +5,7 @@ Core arduino code providing floathub functionality. See floathub.com for
 more information.
 
 
-The mega directory cotains the code flashed to the Arduino Mega.
+The mega directory contains the code flashed to the Arduino Mega.
 
 Note that the esp8266 directory contains separate code that is to be flashed
 to the onboard esp8266.
