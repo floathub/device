@@ -136,6 +136,7 @@ byte          float_hub_aes_key[16];
 bool	nmea_mux_on;				// default: yes
 bool    nmea_mux_private;			// default: no
 bool    relay_ais_data;				// default: yes
+bool    relay_ais_cellular;		        // default: no
 unsigned int  nmea_mux_port;			// default: 2319
 String	web_interface_username;			// default: floathub
 String	web_interface_password;			// default: floathub
@@ -669,6 +670,7 @@ void write_eeprom_memory()
   EEPROM.write(253, lowByte(nmea_mux_port));
   EEPROM.write(324, nmea_mux_private);
   EEPROM.write(325, relay_ais_data);
+  EEPROM.write(326, relay_ais_cellular);
  
   //
   // Web interface username and password
@@ -797,6 +799,7 @@ void read_eeprom_memory()
   nmea_mux_port += EEPROM.read(252) * 256;
   nmea_mux_private = EEPROM.read(324);
   relay_ais_data = EEPROM.read(325);
+  relay_ais_cellular = EEPROM.read(326);
   
   //
   //  Phone home?
@@ -1609,6 +1612,17 @@ void handleOther()
       something_changed = true;
     }
 
+    if(web_server.arg("relayaiscell") == "yes" && !relay_ais_cellular)
+    {
+      relay_ais_cellular = true;
+      something_changed = true;
+    }
+    else if(relay_ais_cellular && web_server.arg("relayaiscell") != "yes")
+    {
+      relay_ais_cellular = false;
+      something_changed = true;
+    }
+
     if(nmea_mux_port != web_server.arg("muxport").toInt())
     {
       nmea_mux_port = web_server.arg("muxport").toInt();
@@ -1682,6 +1696,16 @@ void handleOther()
     page += " checked";
   }
   page += "><br>";
+
+  #ifdef CELLULAR_CODE_ON
+  page += "<label for='relayaiscell'>Relay AIS over Cellular: </label>";
+  page += "<input type='checkbox' name='relayaiscell' value='yes'";
+  if(relay_ais_cellular)
+  {
+    page += " checked";
+  }
+  page += "><br>";
+  #endif
 
   page += "<button type='submit' name='savebutton' value='True'>Save</button>";
   page += "</form></div><br>";
@@ -2067,6 +2091,9 @@ void displayCurrentVariables()
   help_info(String(F("n=")) + nmea_mux_port); 
   help_info(String(F("e=")) + nmea_mux_private); 
   help_info(String(F("r=")) + relay_ais_data); 
+  #ifdef CELLULAR_CODE_ON
+  help_info(String(F("R=")) + relay_ais_cellular); 
+  #endif
   help_info(String(F("u=")) + web_interface_username); 
   help_info(String(F("U=")) + web_interface_password); 
   help_info(String(F("P=")) + phone_home_on); 
@@ -3378,6 +3405,22 @@ void parseInput(String &the_input)
     }
     #endif
   }
+  #ifdef CELLULAR_CODE_ON
+  else if(the_input.startsWith("R=") && the_input.length() >= 3)
+  {        
+    int new_value = the_input.substring(2).toInt();
+    if(the_input[2] == '0' || the_input[2] == '1')
+    { 	
+      processNewFlagValue("r=", relay_ais_cellular, new_value);
+    }
+    #ifdef INPT_DEBUG_ON
+    else
+    {
+      debug_info(F("Bad boolean"));
+    }
+    #endif
+  }
+  #endif
   #ifdef INPT_DEBUG_ON
   else if(the_input.startsWith("r="))
   {

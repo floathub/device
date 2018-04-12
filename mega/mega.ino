@@ -157,7 +157,7 @@
   it's obviously the second one)
 */
 
-#include "./esp8266/version_defines.h"
+#include "version_defines.h"
 
 
 /*
@@ -265,6 +265,8 @@ unsigned long nmea_depth_water_timestamp = 0;
 unsigned long nmea_wind_speed_timestamp = 0;
 unsigned long nmea_wind_direction_timestamp = 0;
 unsigned long nmea_water_temperature_timestamp = 0;
+unsigned long nmea_heading_magnetic_timestamp = 0;
+unsigned long nmea_heading_true_timestamp = 0;
 
 
 /*
@@ -351,6 +353,8 @@ float	nmea_depth_water = -1.0;	// Depth of water below transducer, < 0 means inv
 float	nmea_wind_speed = -1.0;		// Speed of true wind in knots, < 0 invalid/not available
 float	nmea_wind_direction = -1.0;	// Angle of true wind in degrees, < 0 invalid/not available
 float 	nmea_water_temperature = -1.0;	// Temperature of water in _FARENHEIT_, < 0 invalid/not available
+float 	nmea_heading_true = -1.0;	// Temperature of water in _FARENHEIT_, < 0 invalid/not available
+float 	nmea_heading_magnetic = -1.0;	// Temperature of water in _FARENHEIT_, < 0 invalid/not available
 
 
 /*
@@ -1681,6 +1685,8 @@ void report_state(bool console_only)
   possibly_append_data(nmea_wind_speed, -0.5, F(",J:"));
   possibly_append_data(nmea_wind_direction, -0.5, F(",K:"));
   possibly_append_data(nmea_water_temperature, -0.5, F(",Y:"));
+  possibly_append_data(nmea_heading_true, -0.5, F(",G:"));
+  possibly_append_data(nmea_heading_magnetic, -0.5, F(",M:"));
 
   if(!console_only)
   {
@@ -2076,6 +2082,63 @@ void parse_nmea_sentence()
       nmea_wind_direction_timestamp = millis();
     }
   }
+
+  //
+  //	Heading Magnetic and (possibly) True via HDG
+  //
+
+  else if(  popout_nmea_value(F("HDG"), commas[0], commas[1], nmea_heading_magnetic))
+  {
+    #ifdef NMEA_DEBUG_ON
+    debug_info(F("NMEA h mag1:"), nmea_heading_magnetic);
+    #endif
+    nmea_heading_magnetic_timestamp = millis();
+    float deviation = 0.0;
+    float variation = 0.0;
+    if ( popout_nmea_value(F("HDG"), commas[1], commas[2], deviation) ||
+         popout_nmea_value(F("HDG"), commas[3], commas[4], variation)  )
+    {
+      if (nmea_read_buffer[commas[2] + 1] == 'W')
+      {
+        deviation = deviation * -1.0;
+      }
+      if (nmea_read_buffer[commas[4] + 1] == 'W')
+      {
+        variation = variation * -1.0;
+      }
+
+      nmea_heading_true = nmea_heading_magnetic + deviation + variation ;
+      nmea_heading_true_timestamp = millis();
+      #ifdef NMEA_DEBUG_ON
+      debug_info(F("NMEA h tru1:"), nmea_heading_true);
+      #endif
+
+    }
+  }
+
+  //
+  //	Heading Magnetic via HDM
+  //
+
+  else if(  popout_nmea_value(F("HDM"), commas[0], commas[1], nmea_heading_magnetic))
+  {
+    #ifdef NMEA_DEBUG_ON
+    debug_info(F("NMEA h mag2:"), nmea_heading_magnetic);
+    #endif
+    nmea_heading_magnetic_timestamp = millis();
+  }
+
+  //
+  //	Heading True via HDT
+  //
+
+  else if(  popout_nmea_value(F("HDT"), commas[0], commas[1], nmea_heading_true))
+  {
+    #ifdef NMEA_DEBUG_ON
+    debug_info(F("NMEA h tru2:"), nmea_heading_true);
+    #endif
+    nmea_heading_true_timestamp = millis();
+  }
 }
 
 void parse_hsnmea_sentence()
@@ -2431,6 +2494,14 @@ void zero_nmea_values()
   if(millis() - nmea_water_temperature_timestamp > nmea_sample_interval)
   {
     nmea_water_temperature = -1.0;
+  }
+  if(millis() - nmea_heading_magnetic_timestamp > nmea_sample_interval)
+  {
+    nmea_heading_magnetic = -1.0;
+  }
+  if(millis() - nmea_heading_true_timestamp > nmea_sample_interval)
+  {
+    nmea_heading_true = -1.0;
   }
 }
 
