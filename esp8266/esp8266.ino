@@ -542,7 +542,7 @@ void init_eeprom_memory()
 
 
   //
-  // NMEA muxer flag, port of 2319, private, ais relay
+  // NMEA muxer flag, port of 2319, private, ais relay, cellular ais relay
   //
 
   EEPROM.write(251, 1);
@@ -550,6 +550,7 @@ void init_eeprom_memory()
   EEPROM.write(253, 15);
   EEPROM.write(324, 0);
   EEPROM.write(325, 1);
+  EEPROM.write(326, 1);
  
   //
   // Web interface username and password
