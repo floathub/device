@@ -243,7 +243,7 @@ unsigned long console_interval = 250;             	//  Check console for input e
 unsigned long esp8266_interval = 100;			//  Check for input from esp8266 on Serial 1  
 unsigned long led_update_interval = 200;          	//  Update the LED's every 200 miliseconds
 unsigned long nmea_update_interval = 100;         	//  Update NMEA serial-in line every 1/10 of a second
-unsigned long hsnmea_update_interval = 50;		//  Update HS NMEA (SoftwareSerial based) every 1/20 of a second 
+unsigned long hsnmea_update_interval = 10;		//  Update HS NMEA (SoftwareSerial based) 100 times every second
 unsigned long hardware_watchdog_interval = 120000; 	//  Do a hardware reset if we don't pat the dog every 2 minutes
 unsigned long nmea_sample_interval = 30000;		//  Nuke nmea data older than 30 seconds
   
@@ -670,7 +670,6 @@ void setup()
   //
   
   Serial2.begin(4800);
-  
   
   //
   //  Seed the random number generator
@@ -2198,6 +2197,7 @@ void update_nmea()
 void update_hsnmea()
 {
   bool keep_going = true;
+
   while(soft_serial.available() && (int) hsnmea_read_buffer.length() < MAX_NMEA_BUFFER && keep_going == true)
   {
     int incoming_byte = soft_serial.read();
@@ -2294,6 +2294,7 @@ bool try_and_send_encoded_message_to_esp8266()
     {
       return false;
     }
+    Serial.println("Loopy scoopy");
     delay(10);
   }
 

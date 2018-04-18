@@ -49,7 +49,7 @@ String cellular_debug_string;
 //
 
 #define MAX_COOKIES 10
-#define CELLULAR_CODE_ON	
+//	#define CELLULAR_CODE_ON	
 
 
 #include <ESP8266WiFi.h>
@@ -2604,6 +2604,24 @@ void echoNMEA(String a_message)
   // AIS string up to the fdr server
   //
 
+  #ifdef CELLULAR_CODE_ON
+  if(
+      (
+        WiFi.status() == WL_CONNECTED ||
+        ( cellular_link_up && cellular_link_ready && relay_ais_cellular && latest_cellular_message_to_send.length() == 0 )
+      )                              &&
+      phone_home_on == true          &&
+      relay_ais_data == true         &&
+      low_file_pointer < 10	     &&
+      high_file_pointer < 10         &&
+      a_message.indexOf('!') == 0    &&
+      (
+        a_message.indexOf('A') == 1  ||
+        a_message.indexOf('B') == 1  ||
+        a_message.indexOf('S') == 1  
+      )
+     )
+  #else
   if(
       WiFi.status() == WL_CONNECTED  &&
       phone_home_on == true          &&
@@ -2617,6 +2635,7 @@ void echoNMEA(String a_message)
         a_message.indexOf('S') == 1  
       )
      )
+  #endif
   {
     String string_to_send = F("$FHO:");
     string_to_send += float_hub_id + ":" ;
@@ -2730,6 +2749,12 @@ void echoNMEA(String a_message)
       #endif
       fdr_client.stop();
     }
+    #ifdef CELLULAR_CODE_ON
+    else if ( cellular_link_up && cellular_link_ready && relay_ais_cellular && latest_cellular_message_to_send.length() == 0 )
+    {
+      latest_cellular_message_to_send = fhs_message_to_send;
+    }
+    #endif
 
     //
     //  Clean up?
