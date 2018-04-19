@@ -2123,8 +2123,8 @@ void displayCurrentVariables()
   help_info(String(F("Z=")) + virtual_serial_on); 
   help_info(String(F("z=")) + virtual_serial_port); 
 
-  help_info(String(F("  AP-IP: ")) + WiFi.softAPIP().toString()); 
   help_info(String(F("WiFi-IP: ")) + WiFi.localIP().toString()); 
+  help_info(String(F("  AP-IP: ")) + WiFi.softAPIP().toString()); 
 
   unsigned long uptime = millis() / 1000.0;
   if (uptime > 86400)
