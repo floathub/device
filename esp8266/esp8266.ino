@@ -2123,32 +2123,32 @@ void displayCurrentVariables()
   help_info(String(F("Z=")) + virtual_serial_on); 
   help_info(String(F("z=")) + virtual_serial_port); 
 
-  help_info(String(F("AP-IP: ")) + WiFi.softAPIP().toString()); 
+  help_info(String(F("  AP-IP: ")) + WiFi.softAPIP().toString()); 
   help_info(String(F("WiFi-IP: ")) + WiFi.localIP().toString()); 
 
   unsigned long uptime = millis() / 1000.0;
   if (uptime > 86400)
   {
-    help_info(String(F("Uptime: ")) + (uptime / 86400.0) + F(" days"));
+    help_info(String(F(" Uptime: ")) + (uptime / 86400.0) + F(" days"));
   }
   else if (uptime > 3600)
   {
-    help_info(String(F("Uptime: ")) + (uptime / 3600.0) + F(" hours"));
+    help_info(String(F(" Uptime: ")) + (uptime / 3600.0) + F(" hours"));
   }
   else if (uptime > 60)
   {
-    help_info(String(F("Uptime: ")) + (uptime / 60.0) + F(" mins"));
+    help_info(String(F(" Uptime: ")) + (uptime / 60.0) + F(" mins"));
   }
   else
   {
-    help_info(String(F("Uptime: ")) + uptime + F(" secs"));
+    help_info(String(F(" Uptime: ")) + uptime + F(" secs"));
   }
 
   
   #ifdef CELLULAR_CODE_ON
-  help_info(String(F("Cell: ")) + cellular_link_up); 
-  help_info(String(F("Name: ")) + cellular_provider); 
-  help_info(String(F("Sim: ")) + sim_card_number); 
+  help_info(String(F("   Cell: ")) + cellular_link_up); 
+  help_info(String(F("   Name: ")) + cellular_provider); 
+  help_info(String(F("    Sim: ")) + sim_card_number); 
   #endif
 
 }
