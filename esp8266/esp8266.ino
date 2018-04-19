@@ -32,7 +32,7 @@
 //#define FILE_DEBUG_ON
 //#define FILE_SERVE_ON	// Useful when debuggig to see SPIFF files from a browser
 //#define CELL_DEBUG_ON
-#define AISR_DEBUG_ON
+//#define AISR_DEBUG_ON
 
 //
 //  Have to have a separate string for cellular debugging as cellular stuff
@@ -49,7 +49,7 @@ String cellular_debug_string;
 //
 
 #define MAX_COOKIES 10
-//	#define CELLULAR_CODE_ON	
+#define CELLULAR_CODE_ON	
 
 
 #include <ESP8266WiFi.h>
@@ -137,6 +137,7 @@ bool	nmea_mux_on;				// default: yes
 bool    nmea_mux_private;			// default: no
 bool    relay_ais_data;				// default: yes
 bool    relay_ais_cellular;		        // default: no
+bool    force_wifi_connect;			// default: no
 unsigned int  nmea_mux_port;			// default: 2319
 String	web_interface_username;			// default: floathub
 String	web_interface_password;			// default: floathub
@@ -542,7 +543,8 @@ void init_eeprom_memory()
 
 
   //
-  // NMEA muxer flag, port of 2319, private, ais relay, cellular ais relay
+  // NMEA muxer flag, port of 2319, private, ais relay, cellular ais relay,
+  // force cellular 
   //
 
   EEPROM.write(251, 1);
@@ -550,7 +552,8 @@ void init_eeprom_memory()
   EEPROM.write(253, 15);
   EEPROM.write(324, 0);
   EEPROM.write(325, 1);
-  EEPROM.write(326, 1);
+  EEPROM.write(326, 0);
+  EEPROM.write(327, 0);
  
   //
   // Web interface username and password
@@ -672,6 +675,7 @@ void write_eeprom_memory()
   EEPROM.write(324, nmea_mux_private);
   EEPROM.write(325, relay_ais_data);
   EEPROM.write(326, relay_ais_cellular);
+  EEPROM.write(327, force_wifi_connect);
  
   //
   // Web interface username and password
@@ -801,6 +805,7 @@ void read_eeprom_memory()
   nmea_mux_private = EEPROM.read(324);
   relay_ais_data = EEPROM.read(325);
   relay_ais_cellular = EEPROM.read(326);
+  force_wifi_connect = EEPROM.read(327);
   
   //
   //  Phone home?
@@ -1699,7 +1704,7 @@ void handleOther()
   page += "><br>";
 
   #ifdef CELLULAR_CODE_ON
-  page += "<label for='relayaiscell'>Relay AIS over Cellular: </label>";
+  page += "<label for='relayaiscell'>AIS over Cellular: </label>";
   page += "<input type='checkbox' name='relayaiscell' value='yes'";
   if(relay_ais_cellular)
   {
@@ -1776,6 +1781,15 @@ void handleAdvanced()
       virtual_serial_changed = true;
     }  
 
+    if(web_server.arg("forcewifi") == "yes" && !force_wifi_connect)
+    {
+      force_wifi_connect = true;
+    }
+    else if (force_wifi_connect && web_server.arg("forcewifi") != "yes")
+    {
+      force_wifi_connect = false; 
+    }  
+
     if(virtual_serial_port != web_server.arg("vsport").toInt())
     {
       virtual_serial_port = web_server.arg("vsport").toInt();
@@ -1821,6 +1835,13 @@ void handleAdvanced()
   page += "><br>";
   page += "<label for='vsport'>Port: </label>";
   page += "<input type='number' name='vsport' length='5' maxlength='5' value='" + String(virtual_serial_port) + "' ><br>";
+  page += "<label for='forcewifi'>Force Public WiFi: </label>";
+  page += "<input type='checkbox' name='forcewifi' value='yes'";
+  if(force_wifi_connect)
+  {
+    page += " checked";
+  }
+  page += "><br>";
   page += "<button type='submit' name='savebutton' value='True'>Save</button>";
   page += "</form></div><br>";
 
@@ -2059,7 +2080,7 @@ void displayCurrentVariables()
   new_message += ",b=";
   new_message += boot_counter;
   help_info(new_message);
-  new_message = "";
+  
 
   
   help_info(String(F("i=")) + float_hub_id); 
@@ -2095,6 +2116,7 @@ void displayCurrentVariables()
   #ifdef CELLULAR_CODE_ON
   help_info(String(F("R=")) + relay_ais_cellular); 
   #endif
+  help_info(String(F("C=")) + force_wifi_connect); 
   help_info(String(F("u=")) + web_interface_username); 
   help_info(String(F("U=")) + web_interface_password); 
   help_info(String(F("P=")) + phone_home_on); 
@@ -2103,6 +2125,24 @@ void displayCurrentVariables()
 
   help_info(String(F("AP-IP: ")) + WiFi.softAPIP().toString()); 
   help_info(String(F("WiFi-IP: ")) + WiFi.localIP().toString()); 
+
+  unsigned long uptime = millis() / 1000.0;
+  if (uptime > 86400)
+  {
+    help_info(String(F("Uptime: ")) + (uptime / 86400.0) + F(" days"));
+  }
+  else if (uptime > 3600)
+  {
+    help_info(String(F("Uptime: ")) + (uptime / 3600.0) + F(" hours"));
+  }
+  else if (uptime > 60)
+  {
+    help_info(String(F("Uptime: ")) + (uptime / 60.0) + F(" mins"));
+  }
+  else
+  {
+    help_info(String(F("Uptime: ")) + uptime + F(" secs"));
+  }
 
   
   #ifdef CELLULAR_CODE_ON
@@ -3417,6 +3457,28 @@ void parseInput(String &the_input)
   }
   #endif
 
+  else if(the_input.startsWith("C=") && the_input.length() >= 3)
+  {        
+    int new_value = the_input.substring(2).toInt();
+    if(the_input[2] == '0' || the_input[2] == '1')
+    { 	
+      processNewFlagValue("C=", force_wifi_connect, new_value);
+    }
+    #ifdef INPT_DEBUG_ON
+    else
+    {
+      debug_info(F("Bad boolean"));
+    }
+    #endif
+  }
+  #ifdef INPT_DEBUG_ON
+  else if(the_input.startsWith("C="))
+  {
+    debug_info(F("Short input"));
+  }
+  #endif
+
+
   else if(the_input.startsWith("r=") && the_input.length() >= 3)
   {        
     int new_value = the_input.substring(2).toInt();
@@ -3431,6 +3493,13 @@ void parseInput(String &the_input)
     }
     #endif
   }
+  #ifdef INPT_DEBUG_ON
+  else if(the_input.startsWith("r="))
+  {
+    debug_info(F("Short input"));
+  }
+  #endif
+
   #ifdef CELLULAR_CODE_ON
   else if(the_input.startsWith("R=") && the_input.length() >= 3)
   {        
@@ -3446,12 +3515,12 @@ void parseInput(String &the_input)
     }
     #endif
   }
-  #endif
   #ifdef INPT_DEBUG_ON
-  else if(the_input.startsWith("r="))
+  else if(the_input.startsWith("R="))
   {
     debug_info(F("Short input"));
   }
+  #endif
   #endif
 
   else if(the_input.startsWith("n=") && the_input.length() >= 3)
@@ -3751,7 +3820,14 @@ void WiFiHouseKeeping()
       }
     }
 
-    if(saw_public)
+    if(force_wifi_connect)
+    {
+      #ifdef WIFI_DEBUG_ON
+      debug_info(F("WiFi HK: Forced Public"));
+      #endif
+      kickWiFi();
+    }
+    else if(saw_public)
     {
       #ifdef WIFI_DEBUG_ON
       debug_info(F("WiFi HK: Trying Public"));
@@ -3956,7 +4032,7 @@ void fdrHouseKeeping()
     called_mdns_after_connection = false;
 
     //
-    //  If we have cellular, and 
+    //  If we have cellular, and it has been a while 
     //
 
     #ifdef CELLULAR_CODE_ON

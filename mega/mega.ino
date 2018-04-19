@@ -179,6 +179,7 @@ byte cipher[MAX_AES_CIPHER_LENGTH];
 String          float_hub_id;			// default: factoryX
 byte            float_hub_aes_key[16]; 
 bool	        currently_connected = false;
+bool	        cellular_connected = false;
 bool	        console_mode;
 unsigned long   boot_counter;			
 boolean         led_state = false;              //  For cycling on and off  
@@ -632,6 +633,13 @@ void setup()
   #ifdef CONSOLE_DEBUG_ON
   console_mode = true;
   #endif
+
+  //
+  // Assume initial connection state is not
+  //
+
+  currently_connected = false;
+  cellular_connected = false;
 
   //
   //  Serial1 is the ESP8266 (WiFi chip)
@@ -1713,6 +1721,17 @@ void parse_esp8266()
         currently_connected = false;
       }
     }
+    if(esp8266_read_buffer.length() == 23 && esp8266_read_buffer.substring(20).startsWith(F("d=")))
+    {
+      if(esp8266_read_buffer.charAt(22) == '1')
+      {
+        cellular_connected = true;
+      }
+      else
+      {
+        cellular_connected = false;
+      }
+    }
     else if(esp8266_read_buffer.length() >= 30 && esp8266_read_buffer.substring(20).startsWith(F("i=")))
     {
       a_string = esp8266_read_buffer.substring(22,30);
@@ -1969,8 +1988,21 @@ void update_leds()
   } 
   else
   {
-    digitalWrite(COM_LED_1, HIGH);
-    digitalWrite(COM_LED_2, LOW);
+    if(cellular_connected)
+    {
+      digitalWrite(COM_LED_1, LOW);
+      digitalWrite(COM_LED_2, LOW);
+      if(random(0,100) < 25)
+      {
+        digitalWrite(COM_LED_1, LOW);
+        digitalWrite(COM_LED_2, HIGH);
+      }
+    }
+    else
+    {
+      digitalWrite(COM_LED_1, HIGH);
+      digitalWrite(COM_LED_2, LOW);
+    }
   } 
 }
 
@@ -2294,7 +2326,6 @@ bool try_and_send_encoded_message_to_esp8266()
     {
       return false;
     }
-    Serial.println("Loopy scoopy");
     delay(10);
   }
 
