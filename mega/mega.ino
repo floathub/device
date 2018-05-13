@@ -148,7 +148,7 @@
 //#define BARO_DEBUG_ON	
 //#define ACTIVE_DEBUG_ON
 //#define SERIAL_DEBUG_ON
-//#define SOFTSERIAL_DEBUG_ON
+#define SOFTSERIAL_DEBUG_ON
 
 
 /*
@@ -2367,7 +2367,7 @@ void factoryReset()
   digitalWrite(COM_LED_1, LOW);
   digitalWrite(COM_LED_2, LOW);
 
-  Serial1.println("factory");
+  Serial1.println("FactoryResetNow");
   init_eeprom_memory();
   resetFunc();
 }

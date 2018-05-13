@@ -26,13 +26,13 @@
 
 //#define HTTP_DEBUG_ON
 //#define MDNS_DEBUG_ON
-//#define STAT_DEBUG_ON
+#define STAT_DEBUG_ON
 //#define INPT_DEBUG_ON
 //#define WIFI_DEBUG_ON
 //#define FILE_DEBUG_ON
 //#define FILE_SERVE_ON	// Useful when debuggig to see SPIFF files from a browser
-//#define CELL_DEBUG_ON
-//#define AISR_DEBUG_ON
+#define CELL_DEBUG_ON
+#define AISR_DEBUG_ON
 
 //
 //  Have to have a separate string for cellular debugging as cellular stuff
@@ -187,6 +187,7 @@ long unsigned int high_file_pointer;
 //
 #ifdef CELLULAR_CODE_ON
 bool cellular_link_up = 0;
+unsigned long cellular_link_timestamp = 0;
 bool cellular_link_ready = 0;
 String cellular_provider;
 String sim_card_number;
@@ -1109,6 +1110,7 @@ void handleReboot()
 
   delay(200);
   ESP.restart();  
+  ESP.wdtDisable();
 }
 
 
@@ -1312,7 +1314,8 @@ void kickWiFi(bool ap_only=false)
     #endif
     tried_public_wifi_recently = false;
     WiFi.setAutoConnect(false);
-    WiFi.mode(WIFI_AP);
+    //WiFi.mode(WIFI_AP);
+    WiFi.mode(WIFI_AP_STA);
     WiFi.softAP(private_wifi_ssid.c_str(), private_wifi_password.c_str());
     kickMDNS(true);
   }
@@ -1333,15 +1336,15 @@ void kickWiFi(bool ap_only=false)
       attempts++;
     }
 
-    wifi_station_dhcpc_stop();
+    //wifi_station_dhcpc_stop();
     if(public_ip_is_static)
     {
       WiFi.config(public_static_ip, public_static_gate, public_static_mask, public_static_dns);
     }
-    else
-    {
-      wifi_station_dhcpc_start();
-    }
+    //else
+    //{
+    //  wifi_station_dhcpc_start();
+    //}
   }
 
   called_mdns_after_connection = false;
@@ -2332,9 +2335,9 @@ void cellular_callback(uint8_t * data, size_t len)
   //
   // The message can be anything like:
   //
-  //	"LU T-Mobile" = Link Up, provider is tmobile
-  //	"LR AT&T"     = Link good, waiting for more to add to current message
-  //    "LQ Orange"   = Link good, but message still in queue
+  //	"LU 123456 T-Mobile" = Link Up, provider is tmobile
+  //	"LR 123456 AT&T"     = Link good, waiting for more to add to current message
+  //    "LQ 123456 Orange"   = Link good, but message still in queue
   //    "NL"          = No Link
   //
   // 
@@ -2345,6 +2348,7 @@ void cellular_callback(uint8_t * data, size_t len)
   if(message.length() > 1 && message.charAt(0) == 'L')
   {
     cellular_link_up = true;
+    cellular_link_timestamp = millis();
     if(message.length() > 3)
     {
       sim_card_number = message.substring(3, message.indexOf(' ', 3));
@@ -2402,9 +2406,9 @@ void setup_spi_slave_to_cellular()
 {
 
   //
-  // Every 4 seconds, we get a message from the DASH/Cellular modem (running
-  // as SPI Master) that informs us of it's status. We handle that incoming
-  // data (called on an interrupt) with this function:
+  // Every 1/10th of a second, we get a message from the Electron/Cellular
+  // modem (running as SPI Master) that informs us of it's status.  We
+  // handle that incoming data (called on an interrupt) with this function:
   //
 
   SPISlave.onData(cellular_callback);
@@ -2415,6 +2419,7 @@ void setup_spi_slave_to_cellular()
 
   SPISlave.begin();
   cellular_link_up = false;
+  cellular_link_timestamp = 0;
   cellular_provider = F("Unknown");
 }
 
@@ -2447,6 +2452,12 @@ void setupFileSystem()
 
 void setup(void)
 {
+
+  //
+  //  Turn off watchdog
+  //
+
+  ESP.wdtDisable();
 
   // 
   // Reserve some variable space
@@ -3094,9 +3105,9 @@ void parseInput(String &the_input)
     }
   }
 
-  else if(the_input.startsWith("factory"))
+  else if(the_input.startsWith("FactoryResetNow"))
   {
-    help_info("Doing factory reset ...");
+    help_info("Doing factory reset (now) ...");
     init_eeprom_memory();
     read_eeprom_memory();
     initFileSystem();
@@ -3104,6 +3115,7 @@ void parseInput(String &the_input)
     ESP.eraseConfig();
     delay(500);
     ESP.reset();
+    ESP.wdtDisable();
   }
 
   else if(the_input.charAt(0) == 'v')
@@ -3753,6 +3765,20 @@ void houseKeeping()
     #endif
     ESP.restart();
   }
+
+  //
+  // Check that we have _positively_ been informed that the cellular link is
+  // up, otherwise assume it is down
+  //
+  #ifdef CELLULAR_CODE_ON
+  if(millis() - cellular_link_timestamp > 30 * 1000 && cellular_link_up)
+  {
+    cellular_link_up = false;
+    #ifdef CELL_DEBUG_ON
+    debug_info("Forced cell link flag to false due to inactivity");
+    #endif
+  }
+  #endif
 }
 
 
@@ -3809,8 +3835,8 @@ void WiFiHouseKeeping()
   if(wifi_housekeeping_cycle_counter == 10 )
   {
     bool saw_public = false;    
-
     byte numSsid = WiFi.scanNetworks();
+
     for (int i = 0; i < numSsid; i++)
     {
       if (public_wifi_ssid == String(WiFi.SSID(i)))
@@ -4088,6 +4114,7 @@ void readConsole()
   //
 
   while((Serial.available() && (int) console_read_buffer.length() < MAX_CONSOLE_BUFFER) || (millis() - right_right_now) < 2000UL)
+  //while((Serial.available() && (int) console_read_buffer.length() < MAX_CONSOLE_BUFFER))
   {
     if(Serial.available() && (int) console_read_buffer.length() < MAX_CONSOLE_BUFFER)
     {
@@ -4159,12 +4186,33 @@ void loop(void)
   if(current_timestamp - console_previous_timestamp > console_read_interval)
   {
     console_previous_timestamp = current_timestamp;
+    unsigned long duration = millis();
     readConsole();
+
+    help_info(String(F("readConsole took ")) +  ((millis() - duration )/ 1000.00));
   }
   if(current_timestamp - house_keeping_previous_timestamp >  house_keeping_interval)
   {
     house_keeping_previous_timestamp = current_timestamp;
     houseKeeping();
+
+    unsigned long uptime = millis() / 1000.0;
+    if (uptime > 86400)
+    {
+      help_info(String(F(" Uptime: ")) + (uptime / 86400.0) + F(" days"));
+    }
+    else if (uptime > 3600)
+    {
+      help_info(String(F(" Uptime: ")) + (uptime / 3600.0) + F(" hours"));
+    }
+    else if (uptime > 60)
+    {
+      help_info(String(F(" Uptime: ")) + (uptime / 60.0) + F(" mins"));
+    }
+    else
+    {
+      help_info(String(F(" Uptime: ")) + uptime + F(" secs"));
+    }
   }
   if(current_timestamp - wifi_housekeeping_previous_timestamp >  wifi_housekeeping_interval)
   {
@@ -4183,8 +4231,13 @@ void loop(void)
   } 
   if(current_timestamp - network_previous_timestamp > network_interval)
   {
+    network_previous_timestamp = current_timestamp;
     web_server.handleClient();
   }
+
+
+
+
 }
 
 
