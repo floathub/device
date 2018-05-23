@@ -26,13 +26,13 @@
 
 //#define HTTP_DEBUG_ON
 //#define MDNS_DEBUG_ON
-#define STAT_DEBUG_ON
+//#define STAT_DEBUG_ON
 //#define INPT_DEBUG_ON
 //#define WIFI_DEBUG_ON
 //#define FILE_DEBUG_ON
 //#define FILE_SERVE_ON	// Useful when debuggig to see SPIFF files from a browser
-#define CELL_DEBUG_ON
-#define AISR_DEBUG_ON
+//#define CELL_DEBUG_ON
+//#define AISR_DEBUG_ON
 
 //
 //  Have to have a separate string for cellular debugging as cellular stuff
@@ -49,7 +49,7 @@ String cellular_debug_string;
 //
 
 #define MAX_COOKIES 10
-#define CELLULAR_CODE_ON	
+//#define CELLULAR_CODE_ON	
 
 
 #include <ESP8266WiFi.h>
@@ -2071,6 +2071,27 @@ void signalIdle()
 }
 
 
+void displayUptime()
+{
+  unsigned long uptime = millis() / 1000.0;
+  if (uptime > 86400)
+  {
+    help_info(String(F(" Uptime: ")) + (uptime / 86400.0) + F(" days"));
+  }
+  else if (uptime > 3600)
+  {
+    help_info(String(F(" Uptime: ")) + (uptime / 3600.0) + F(" hours"));
+  }
+  else if (uptime > 60)
+  {
+    help_info(String(F(" Uptime: ")) + (uptime / 60.0) + F(" mins"));
+  }
+  else
+  {
+    help_info(String(F(" Uptime: ")) + uptime + F(" secs"));
+  }
+}
+
 void displayCurrentVariables()
 {
   String new_message = "v=";
@@ -2129,24 +2150,7 @@ void displayCurrentVariables()
   help_info(String(F("WiFi-IP: ")) + WiFi.localIP().toString()); 
   help_info(String(F("  AP-IP: ")) + WiFi.softAPIP().toString()); 
 
-  unsigned long uptime = millis() / 1000.0;
-  if (uptime > 86400)
-  {
-    help_info(String(F(" Uptime: ")) + (uptime / 86400.0) + F(" days"));
-  }
-  else if (uptime > 3600)
-  {
-    help_info(String(F(" Uptime: ")) + (uptime / 3600.0) + F(" hours"));
-  }
-  else if (uptime > 60)
-  {
-    help_info(String(F(" Uptime: ")) + (uptime / 60.0) + F(" mins"));
-  }
-  else
-  {
-    help_info(String(F(" Uptime: ")) + uptime + F(" secs"));
-  }
-
+  displayUptime();
   
   #ifdef CELLULAR_CODE_ON
   help_info(String(F("   Cell: ")) + cellular_link_up); 
@@ -4186,33 +4190,15 @@ void loop(void)
   if(current_timestamp - console_previous_timestamp > console_read_interval)
   {
     console_previous_timestamp = current_timestamp;
-    unsigned long duration = millis();
+    //unsigned long duration = millis();
     readConsole();
-
-    help_info(String(F("readConsole took ")) +  ((millis() - duration )/ 1000.00));
+    //help_info(String(F("readConsole took ")) +  ((millis() - duration )/ 1000.00));
   }
   if(current_timestamp - house_keeping_previous_timestamp >  house_keeping_interval)
   {
     house_keeping_previous_timestamp = current_timestamp;
     houseKeeping();
-
-    unsigned long uptime = millis() / 1000.0;
-    if (uptime > 86400)
-    {
-      help_info(String(F(" Uptime: ")) + (uptime / 86400.0) + F(" days"));
-    }
-    else if (uptime > 3600)
-    {
-      help_info(String(F(" Uptime: ")) + (uptime / 3600.0) + F(" hours"));
-    }
-    else if (uptime > 60)
-    {
-      help_info(String(F(" Uptime: ")) + (uptime / 60.0) + F(" mins"));
-    }
-    else
-    {
-      help_info(String(F(" Uptime: ")) + uptime + F(" secs"));
-    }
+    //displayUptime();
   }
   if(current_timestamp - wifi_housekeeping_previous_timestamp >  wifi_housekeeping_interval)
   {
