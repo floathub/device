@@ -49,7 +49,7 @@ String cellular_debug_string;
 //
 
 #define MAX_COOKIES 10
-//#define CELLULAR_CODE_ON	
+#define CELLULAR_CODE_ON	
 
 
 #include <ESP8266WiFi.h>
@@ -4075,7 +4075,9 @@ void fdrHouseKeeping()
         latest_cellular_message_to_send.length() == 0
        )
     {
+      #ifdef CELL_DEBUG_ON
       debug_info(F("Using cellular for message"));
+      #endif
       latest_cellular_message_to_send = latest_message_to_send + "\r\n";
       latest_message_to_send = "";
 
