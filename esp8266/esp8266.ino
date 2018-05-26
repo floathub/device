@@ -270,8 +270,27 @@ String	virtual_serial_read_buffer;
 
 unsigned watchdog_timestamp;
 #define  WATCHDOG_TIME_LIMIT 21600000UL		    // If we do not manage to get any data through to FDR after 6 hours, reboot the whole shebang 
-#define  WATCHDOG_USE_CELLULAR_TIME_LIMIT 720000UL  // If WiFi is connected, but we have not been able to send any data for at least 12 minutes, use cellular data if available 
+#define  WATCHDOG_USE_CELLULAR_TIME_LIMIT 30000UL   // After boot up, give it 30 seconds
 
+
+//
+//  Flag to signal that we need to jump out of any SIPSlave callbacks
+// _super_ quick if we are doing SPIFF stuff
+//
+
+bool busy_doing_spiffs_stuff = false;
+
+void startNoInterrupts()
+{
+  noInterrupts();
+  busy_doing_spiffs_stuff = true; 
+}
+
+void endNoInterrupts()
+{
+  interrupts();
+  busy_doing_spiffs_stuff = false; 
+}
 
 void help_info(String some_info)
 {
@@ -2175,14 +2194,15 @@ void showFileList(bool actually_show = true)
   }
   String file_name;
   int file_name_number = 0;
+  startNoInterrupts();
   Dir dir = SPIFFS.openDir("/");
   while(dir.next())
   {
     file_name = String(dir.fileName()).substring(1);
-    if(actually_show)
-    {
-      help_info(file_name);
-    }
+    //if(actually_show)
+    //{
+    //  help_info(file_name);
+    //}
     if(file_name != "floathub.txt")
     {
       file_name_number = file_name.toInt();
@@ -2203,6 +2223,7 @@ void showFileList(bool actually_show = true)
       }
     }
   }
+  endNoInterrupts();
   if(actually_show)
   {
     help_info(String("LP=") + low_file_pointer + String(", HP=") + high_file_pointer); 
@@ -2213,13 +2234,16 @@ void showFileList(bool actually_show = true)
 
 bool nukeOldestFile()
 {
+  startNoInterrupts();
   if(!SPIFFS.remove("/" + String(low_file_pointer)))
   {
     #ifdef FILE_DEBUG_ON
     debug_info(F("Can't delete file"), (int) low_file_pointer);
     #endif
+    endNoInterrupts();
     return false;
   }
+  endNoInterrupts();
   low_file_pointer += 1; 
   return true;
 }
@@ -2228,10 +2252,12 @@ bool nukeOldestFile()
 bool initFileSystem()
 {
   help_info(F("Formatting new filesystem"));
+  startNoInterrupts();
   if(!SPIFFS.format())
   {
     help_info(F("BROKEN FILE SYSTEM A"));
     filesystem_is_working = false;
+    endNoInterrupts();
     return false;
   }
   File checker = SPIFFS.open("/floathub.txt","w");
@@ -2239,10 +2265,12 @@ bool initFileSystem()
   {
     help_info(F("BROKEN FILE SYSTEM B"));
     filesystem_is_working = false;
+    endNoInterrupts();
     return false;
   }
   checker.print("424242424242");
   checker.close();
+  endNoInterrupts();
   filesystem_is_working = true;
   return true;
 }
@@ -2261,9 +2289,11 @@ void popMessageQueue()
     latest_message_to_send == "";
     while(latest_message_to_send.length() == 0 && low_file_pointer <= high_file_pointer && low_file_pointer > 0)
     {
+      startNoInterrupts();
       File f = SPIFFS.open("/" + String(low_file_pointer), "r");
       if(!f)
       {
+        endNoInterrupts();
         #ifdef FILE_DEBUG_ON
         debug_info("Bad File/Mess. Rebuild");
         #endif
@@ -2289,6 +2319,7 @@ void popMessageQueue()
           latest_message_to_send += (char) f.read();
         }
         f.close();
+        endNoInterrupts();
         if(latest_message_to_send.length() < 1)
         {
           #ifdef FILE_DEBUG_ON
@@ -2322,9 +2353,12 @@ void popMessageQueue()
 
 #ifdef CELLULAR_CODE_ON
 
-
 void cellular_callback(uint8_t * data, size_t len)
 {
+  if(busy_doing_spiffs_stuff)
+  {
+    return;
+  }
   //
   // We have received this message, describing the status of the cellular
   // modem
@@ -2431,6 +2465,7 @@ void setup_spi_slave_to_cellular()
 
 void setupFileSystem()
 {
+  startNoInterrupts();
   SPIFFS.begin();
 
   //
@@ -2442,11 +2477,13 @@ void setupFileSystem()
   
   if(!checker)
   {
+    endNoInterrupts();
     initFileSystem();
     return;
   }
 
   checker.close();
+  endNoInterrupts();
   filesystem_is_working = true;
 
   showFileList();
@@ -2488,6 +2525,13 @@ void setup(void)
   serial_ready_pin = 5;
   pinMode(serial_ready_pin, OUTPUT);
   signalBusy();
+
+  //
+  //  Initial state for SPIFFS
+  //
+
+  busy_doing_spiffs_stuff = false;
+
 
   //
   // Seed the random number generator so our cookie values are reasonably (pseudo-)random
@@ -2833,7 +2877,9 @@ void pushMessageQueue(String a_message)
     debug_info(F("Free file space ..."));
     #endif
     FSInfo fs_info;
+    startNoInterrupts();
     SPIFFS.info(fs_info);
+    endNoInterrupts();
 
     long int space_left = fs_info.totalBytes - fs_info.usedBytes;
 
@@ -2867,7 +2913,9 @@ void pushMessageQueue(String a_message)
            low_file_pointer = 0;
            high_file_pointer = 0;
         }
+        startNoInterrupts();
         SPIFFS.info(fs_info);
+        endNoInterrupts();
         space_left = fs_info.totalBytes - fs_info.usedBytes;
       } 
     }
@@ -2876,9 +2924,11 @@ void pushMessageQueue(String a_message)
     // Create a file called high_file_pointer and write the message inside it
     //
 
+    startNoInterrupts();
     File f = SPIFFS.open("/" + String(high_file_pointer + 1), "w");
     if(!f)
     {
+      endNoInterrupts();
       bool keep_going = true;
       while(keep_going)
       {
@@ -2892,9 +2942,11 @@ void pushMessageQueue(String a_message)
           low_file_pointer = 0;
           high_file_pointer = 0;
         }
+        startNoInterrupts();
         SPIFFS.info(fs_info);
         space_left = fs_info.totalBytes - fs_info.usedBytes;
         f= SPIFFS.open("/" + String(high_file_pointer + 1), "w");
+        endNoInterrupts();
         if(f)
         {
           f.print(a_message);
@@ -2924,6 +2976,7 @@ void pushMessageQueue(String a_message)
       }
     }
     f.close();
+    endNoInterrupts();
   }
   else
   {
@@ -3775,7 +3828,7 @@ void houseKeeping()
   // up, otherwise assume it is down
   //
   #ifdef CELLULAR_CODE_ON
-  if(millis() - cellular_link_timestamp > 30 * 1000 && cellular_link_up)
+  if(millis() - cellular_link_timestamp > 5 * 1000 && cellular_link_up)
   {
     cellular_link_up = false;
     #ifdef CELL_DEBUG_ON
@@ -4066,7 +4119,7 @@ void fdrHouseKeeping()
     //
 
     #ifdef CELLULAR_CODE_ON
-    if (
+    if ( 
         millis() - watchdog_timestamp > WATCHDOG_USE_CELLULAR_TIME_LIMIT &&
 	cellular_link_up == true &&
 	cellular_link_ready == true &&
@@ -4222,10 +4275,6 @@ void loop(void)
     network_previous_timestamp = current_timestamp;
     web_server.handleClient();
   }
-
-
-
-
 }
 
 

@@ -25,13 +25,14 @@ SYSTEM_MODE(MANUAL);
 #define HOUSEKEEPING_INTERVAL        1000      // Check our network status and do other core tasks once every second
 #define CONNECTION_ATTEMPT_INTERVAL  10000     // If we don't have a connection, how long do we wait between attempts
 #define MESSAGE_COMPLETION_LIMIT     60000     // If we can't assemble a whole message within 1 minute, assume it is garbled and toss it
-#define REGULAR_POLLING_INTERVAL     100       // When otherwise idle, poll the ESP8266 for a message every 1/10 of a second
-#define ASSEMBLE_POLLING_INTERVAL    5         // Poll the ESP8266 every 1/200 second when we are in the process of assembling
+#define REGULAR_POLLING_INTERVAL     500       // When otherwise idle, poll the ESP8266 for a message every 1/2 of a second
+#define ASSEMBLE_POLLING_INTERVAL    100       // Poll the ESP8266 every 1/10 second when we are in the process of assembling
 //#define SIMULATE_SENDING           2000      // If defined, simulate sending the message out after defined period (debug cod
 #define PARTICLE_TOPIC               "fhub"    // The "topic" that goes with the message to Hologram's Systems
+#define WATCHDOG_TIME_LIMIT       3600000UL    // If we do not manage to connect at all after 1 hour, reboot cellular
+
 
 // Default timeout in milliseconds for the calls straight to the cellular modem
-
 static const system_tick_t DEFAULT_TIMEOUT = 10000;
 
 //
@@ -45,6 +46,7 @@ unsigned long connection_attempt_timestamp = 0;
 unsigned long message_completion_timestamp = 0;
 unsigned long regular_polling_timestamp = 0;
 unsigned long assemble_polling_timestamp = 0;
+unsigned long watchdog_timestamp = 0;
 bool current_cellular_status = false;
 #ifdef SIMULATE_SENDING
 unsigned long simulated_sending_timestamp = 0;
@@ -373,6 +375,7 @@ void do_housekeeping()
 {
   if(Particle.connected())
   {
+    watchdog_timestamp = millis();
     #ifdef DEBUG_ON
     Serial.println("IN Particle.process()");
     #endif
@@ -463,6 +466,18 @@ void do_housekeeping()
     Serial.println(String(F(" Uptime: ")) + uptime + F(" secs"));
   }
   #endif
+  
+  //
+  //  Check watchdog
+  //
+  
+  if(millis() - watchdog_timestamp > WATCHDOG_TIME_LIMIT)
+  {
+    Serial.println("No connection after hours, rebooting cellular");
+    delay(2000);
+    System.reset();
+  }
+  
 }
 
 
@@ -564,6 +579,7 @@ void setup() {
   message_completion_timestamp = 0;
   regular_polling_timestamp = 0;
   assemble_polling_timestamp = 0;
+  watchdog_timestamp = 0;
 }
 
 void loop() {

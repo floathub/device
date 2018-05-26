@@ -1,8 +1,16 @@
 
 
+Compile:
+
+  particle compile electron electron.ino
+
+Can contrain to a target:
+
+  particle compile electron --target 0.7.0 electron
+
 To flash firmware:
 
-  particle flash --serial ~/Downloads/firmware.bin
+  particle flash --serial electron.bin
 
 
 To see debugging output:

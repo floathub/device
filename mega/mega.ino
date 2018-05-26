@@ -192,7 +192,7 @@ unsigned long	user_reset_pin_timestamp = 0;	//  Last time the user rest pin was 
 #define         USER_RESET_FACTORY_TIME 20000	//  Hold down reset pin for 20 seconds to make device factory reset
 int		send_message_failures = 0;	//  Number of times we can fail to send something to ESP8266 before we dual reboot
 #define		MAX_SEND_MESSAGE_FAILURES 5
-
+#define         ACTIVE_SPEED_THRESHOLD 1.0
 
 /*
   Status LED's
@@ -1181,8 +1181,7 @@ void parse_gps_buffer_as_rmc()
     gps_sog.substring(0,gps_sog.length()).toCharArray(temp_string, 19);
     float_one = atof(temp_string);
   
-    //if(float_one > 0.25)  //  Moving faster than a 1/4 knot?
-    if(float_one > 0.33)  //  Faster than 1/3 of a knot?
+    if(float_one > ACTIVE_SPEED_THRESHOLD)  //  Faster than 1/3 of a knot?
     {
       #ifdef ACTIVE_DEBUG_ON
       debug_info(F("active: ON "), float_one);

@@ -18,6 +18,7 @@
   License along with this library; if not, write to the Free Software
   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
+
 #ifndef _SPISLAVE_H_INCLUDED
 #define _SPISLAVE_H_INCLUDED
 
@@ -52,6 +53,7 @@ public:
     {}
     ~SPISlaveClass() {}
     void begin();
+    void end();
     void setData(uint8_t * data, size_t len);
     void setData(const char * data)
     {
