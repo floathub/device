@@ -119,7 +119,8 @@ void try_to_send()
       part_topic += "/";
       part_topic += String(numb_parts);
       String part_data = latest_cellular_message_to_send.substring((part_number - 1) * 254, ((part_number - 1) * 254) + 254);
-      if (!Particle.publish(part_topic, latest_cellular_message_to_send, 60, PRIVATE))
+      //if (!Particle.publish(part_topic, latest_cellular_message_to_send, 60, PRIVATE))
+      if (!Particle.publish(part_topic, part_data, 60, PRIVATE))
       {
         all_good = false;
       }
