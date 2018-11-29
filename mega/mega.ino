@@ -5,7 +5,13 @@
  (begun June 6, 2011)
 
 
-  January-March 2018
+  March 2018
+
+  Rewrite of cellular system to use Particle Elctron rather than Hologram
+  Dash (which was suddenly discontinued)
+
+
+  January-February 2018
 
   Celullar communications via Hologram DASH and AIS relaying to fdr server.
 
