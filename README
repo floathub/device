@@ -50,10 +50,7 @@ should have the RX buffer changed from 64 bytes to 128 bytes as in:
 ESP8266 Libraries
 -----------------
 
-The only verified version of the ESP8266 Board library for the Arduino
-environment currently reccommended is 2.3.0. Versions 2.4.0 and 2.4.1 have
-been tested and are know _NOT_ to work reliably (especially with
-(re-)joining public WiFi automatically after a disconnect).
+The currently reccommended board library version is 2.4.1.
 
 
 
