@@ -50,7 +50,7 @@ should have the RX buffer changed from 64 bytes to 128 bytes as in:
 ESP8266 Libraries
 -----------------
 
-The currently reccommended board library version is 2.4.1.
+The currently recommended board library version is 2.4.1.
 
 
 
