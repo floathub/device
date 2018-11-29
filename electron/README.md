@@ -4,7 +4,7 @@ Compile:
 
   particle compile electron electron.ino
 
-Can contrain to a target:
+Can constrain to a target:
 
   particle compile electron --target 0.7.0 electron
 

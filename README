@@ -10,8 +10,10 @@ The mega directory contains the code flashed to the Arduino Mega.
 Note that the esp8266 directory contains separate code that is to be flashed
 to the onboard esp8266.
 
-And the dash directory is used to flash Hologram Dash in FloatHub devices that have cellular. 
-
+And the electron directory is used to flash the Electron board from
+Particle.io (for FloatHub devices with cellular connectivity).  This code no
+longer uses the Hologram Dash which was briefly used as a cellular
+connectivity option.
 
 The ONLY TESTED AND RECOMMENDED build environment for this code is Arduino
 1.6.7 with the following serial buffer modifications:
@@ -55,7 +57,7 @@ been tested and are know _NOT_ to work reliably (especially with
 
 
 
-Konekt/Hologram Dash Libraries
+Electron/Particle.io Libraries
 ------------------------------
 
-Built and tested with 0.11.1, which is the reccommended version.
+Built and tested with 0.7.0, which is the only recommended version.
