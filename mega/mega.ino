@@ -145,6 +145,7 @@
 
 //#define CONSOLE_DEBUG_ON
 //#define GPS_DEBUG_ON
+//#define GPS_SOURCE_DEBUG_ON
 //#define PUMP_DEBUG_ON
 //#define EXECUTION_PATH_DEBUG_ON
 //#define NMEA_DEBUG_ON
@@ -220,6 +221,7 @@ int		send_message_failures = 0;	//  Number of times we can fail to send somethin
 String latest_message_to_send = "";
 String new_message = "";
 String a_string = "";
+String b_string = "";
 char   temp_string[20];  
 
 
@@ -274,6 +276,9 @@ unsigned long nmea_wind_direction_timestamp = 0;
 unsigned long nmea_water_temperature_timestamp = 0;
 unsigned long nmea_heading_magnetic_timestamp = 0;
 unsigned long nmea_heading_true_timestamp = 0;
+unsigned long nmea_gga_timestamp = 0;
+unsigned long nmea_rmc_timestamp = 0;
+
 
 
 /*
@@ -630,6 +635,7 @@ void setup()
   new_message.reserve(MAX_NEW_MESSAGE_SIZE);
   latest_message_to_send.reserve(MAX_LATEST_MESSAGE_SIZE);
   a_string.reserve(MAX_LATEST_MESSAGE_SIZE);
+  b_string.reserve(MAX_GPS_BUFFER);
 
   //
   //  Do we put out FHA/FHB/FHC messages on the console?
@@ -1074,6 +1080,16 @@ void parse_gps_buffer_as_rmc()
   int tmg_start = gps_read_buffer.indexOf(',', sog_start + 1); 
   int date_start = gps_read_buffer.indexOf(',', tmg_start + 1);
   int var_start =  gps_read_buffer.indexOf(',', date_start + 1);
+
+  //
+  // Some (external!) GPS devices don't have a decimal point in the time
+  // value, so we have to check for that here
+  //
+  if(time_break > status_start)
+  {
+    time_break = status_start;
+  }
+
   
   if( time_start < 0    ||    time_start >= (int) gps_read_buffer.length()    ||
       time_break < 0    ||    time_break >= (int) gps_read_buffer.length()    ||
@@ -1109,6 +1125,7 @@ void parse_gps_buffer_as_rmc()
   /*
     Break GPS time/date into integer parts
   */
+
 
   gps_utc  = gps_read_buffer.substring(time_start + 1, time_break);
   gps_utc += gps_read_buffer.substring(date_start + 1, var_start - 2);
@@ -1449,9 +1466,14 @@ void gps_read()
           debug_info(F("--GPS BUF RMC--"));
           debug_info(gps_read_buffer);
           #endif
-          push_out_nmea_sentence(false);
-          parse_gps_buffer_as_rmc();
-
+          if(millis() - nmea_rmc_timestamp > nmea_sample_interval)
+	  {
+            #ifdef GPS_SOURCE_DEBUG_ON
+            debug_info(F("GPS RMC INTERNAL"));
+            #endif
+            push_out_nmea_sentence(false);
+            parse_gps_buffer_as_rmc();
+	  }
         }
         else if(gps_read_buffer.indexOf(F("$GPGGA,")) == 0)
         {
@@ -1459,8 +1481,14 @@ void gps_read()
           debug_info(F("--GPS BUF GGA--"));
           debug_info(gps_read_buffer);
           #endif
-          push_out_nmea_sentence(false);
-          parse_gps_buffer_as_gga();
+          if(millis() - nmea_gga_timestamp > nmea_sample_interval)
+	  {
+            #ifdef GPS_SOURCE_DEBUG_ON
+            debug_info(F("GPS GGA INTERNAL"));
+            #endif
+            push_out_nmea_sentence(false);
+            parse_gps_buffer_as_gga();
+	  }
         }
       }
       gps_read_buffer = "";
@@ -2065,14 +2093,66 @@ void parse_nmea_sentence()
   }
 
   //
+  // If we have location data coming in on NMEA in, we will use that instead
+  // of our onboard GPS
+  //
+
+  if(nmea_read_buffer.startsWith("$GPGGA"))
+  {
+    #ifdef GPS_SOURCE_DEBUG_ON
+    debug_info(F("GPS GGA EXTERNAL"));
+    #endif
+    b_string = gps_read_buffer;
+    gps_read_buffer = nmea_read_buffer;
+    parse_gps_buffer_as_gga();
+    gps_read_buffer = b_string; 
+    if(gps_valid)
+    {
+      nmea_gga_timestamp = millis();
+    }
+  }
+
+  else if(nmea_read_buffer.startsWith("$GPRMC"))
+  {
+    #ifdef GPS_SOURCE_DEBUG_ON
+    debug_info(F("GPS RMC EXTERNAL"));
+    #endif
+    b_string = gps_read_buffer;
+    gps_read_buffer = nmea_read_buffer;
+    parse_gps_buffer_as_rmc();
+    gps_read_buffer = b_string; 
+    if(gps_valid)
+    {
+      nmea_rmc_timestamp = millis();
+    }
+  }
+
+  //
   //	Depth below transducer
   //
 
-  if( popout_nmea_value(F("DBT"), commas[2], commas[3], nmea_depth_water))
+  else if( popout_nmea_value(F("DBT"), commas[2], commas[3], nmea_depth_water))
   {
     #ifdef NMEA_DEBUG_ON
-    debug_info(F("NMEA d water:"), nmea_depth_water);
+    debug_info(F("NMEA dbt water:"), nmea_depth_water);
     #endif    
+    nmea_depth_water_timestamp = millis();
+  }
+
+  //
+  //	Depth of water
+  //
+
+  else if( popout_nmea_value(F("DPT"), commas[0], commas[1], nmea_depth_water))
+  {
+    float offset = 0.0;
+    if( popout_nmea_value(F("DPT"), commas[1], commas[2], offset))
+    {
+      nmea_depth_water += offset;
+    }
+    #ifdef NMEA_DEBUG_ON
+    debug_info(F("NMEA dpt water:"), nmea_depth_water);
+    #endif
     nmea_depth_water_timestamp = millis();
   }
 
