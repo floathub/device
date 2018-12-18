@@ -2097,7 +2097,7 @@ void parse_nmea_sentence()
   // of our onboard GPS
   //
 
-  if(nmea_read_buffer.startsWith("$GPGGA"))
+  if(nmea_read_buffer.indexOf(F("GGA")) == 3)
   {
     #ifdef GPS_SOURCE_DEBUG_ON
     debug_info(F("GPS GGA EXTERNAL"));
@@ -2112,7 +2112,7 @@ void parse_nmea_sentence()
     }
   }
 
-  else if(nmea_read_buffer.startsWith("$GPRMC"))
+  else if(nmea_read_buffer.indexOf(F("RMC")) == 3)
   {
     #ifdef GPS_SOURCE_DEBUG_ON
     debug_info(F("GPS RMC EXTERNAL"));
