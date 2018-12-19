@@ -273,6 +273,8 @@ unsigned long nmea_speed_water_timestamp = 0;
 unsigned long nmea_depth_water_timestamp = 0;
 unsigned long nmea_wind_speed_timestamp = 0;
 unsigned long nmea_wind_direction_timestamp = 0;
+unsigned long nmea_wind_speed_abs_timestamp = 0;
+unsigned long nmea_wind_direction_abs_timestamp = 0;
 unsigned long nmea_water_temperature_timestamp = 0;
 unsigned long nmea_heading_magnetic_timestamp = 0;
 unsigned long nmea_heading_true_timestamp = 0;
@@ -362,8 +364,10 @@ pump_state pump_three_state = off;
 
 float	nmea_speed_water = -1.0;	// Speed through water in knots, < 0 means invalid/no reading (do not report)
 float	nmea_depth_water = -1.0;	// Depth of water below transducer, < 0 means invalid/not available
-float	nmea_wind_speed = -1.0;		// Speed of true wind in knots, < 0 invalid/not available
-float	nmea_wind_direction = -1.0;	// Angle of true wind in degrees, < 0 invalid/not available
+float	nmea_wind_speed = -1.0;		// Speed of true wind in knots, < 0 invalid/not available (apparent)
+float	nmea_wind_direction = -1.0;	// Angle of true wind in degrees, < 0 invalid/not available (apparent)
+float	nmea_wind_speed_abs = -1.0; 	// Speed of true wind in knots, < 0 invalid/not available (absolute)
+float	nmea_wind_direction_abs = -1.0;	// Angle of true wind in degrees, < 0 invalid/not available (absolute)
 float 	nmea_water_temperature = -1.0;	// Temperature of water in _FARENHEIT_, < 0 invalid/not available
 float 	nmea_heading_true = -1.0;	// Temperature of water in _FARENHEIT_, < 0 invalid/not available
 float 	nmea_heading_magnetic = -1.0;	// Temperature of water in _FARENHEIT_, < 0 invalid/not available
@@ -1725,6 +1729,8 @@ void report_state(bool console_only)
   possibly_append_data(nmea_depth_water, -0.5, F(",D:"));
   possibly_append_data(nmea_wind_speed, -0.5, F(",J:"));
   possibly_append_data(nmea_wind_direction, -0.5, F(",K:"));
+  possibly_append_data(nmea_wind_speed_abs, -0.5, F(",W:"));
+  possibly_append_data(nmea_wind_direction_abs, -0.5, F(",X:"));
   possibly_append_data(nmea_water_temperature, -0.5, F(",Y:"));
   possibly_append_data(nmea_heading_true, -0.5, F(",G:"));
   possibly_append_data(nmea_heading_magnetic, -0.5, F(",M:"));
@@ -2201,6 +2207,25 @@ void parse_nmea_sentence()
   }
 
   //
+  //	Absolute Wind Speed and direction 
+  //
+  
+  else if(  popout_nmea_value(F("MWD"), commas[4], commas[5], nmea_wind_speed_abs))
+  {
+    #ifdef NMEA_DEBUG_ON
+    debug_info(F("NMEA abw speed:"), nmea_wind_speed_abs);
+    #endif
+    nmea_wind_speed_abs_timestamp = millis();
+    if(	popout_nmea_value(F("MWD"), commas[0], commas[1], nmea_wind_direction_abs))
+    {
+      #ifdef NMEA_DEBUG_ON
+      debug_info(F("NMEA abw direction:"), nmea_wind_direction_abs);
+      #endif
+      nmea_wind_direction_abs_timestamp = millis();
+    }
+  }
+
+  //
   //	Heading Magnetic and (possibly) True via HDG
   //
 
@@ -2608,6 +2633,14 @@ void zero_nmea_values()
   if(millis() - nmea_wind_direction_timestamp > nmea_sample_interval)
   {
     nmea_wind_direction = -1.0;
+  }
+  if(millis() - nmea_wind_speed_abs_timestamp > nmea_sample_interval)
+  {
+    nmea_wind_speed_abs = -1.0;
+  }
+  if(millis() - nmea_wind_direction_abs_timestamp > nmea_sample_interval)
+  {
+    nmea_wind_direction_abs = -1.0;
   }
   if(millis() - nmea_water_temperature_timestamp > nmea_sample_interval)
   {
