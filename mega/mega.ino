@@ -2297,14 +2297,9 @@ void parse_hsnmea_sentence()
   {
     a_string = nmea_read_buffer;
     nmea_read_buffer = hsnmea_read_buffer;
-    if(validate_nmea_buffer())
-    {
-      parse_nmea_sentence();
-    }
+    parse_nmea_sentence();
     nmea_read_buffer = a_string; 
   }
-
-
 }
 
 void update_nmea()
