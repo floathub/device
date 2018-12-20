@@ -2110,13 +2110,10 @@ void parse_nmea_sentence()
     #endif
     b_string = gps_read_buffer;
     gps_read_buffer = nmea_read_buffer;
-    if(validate_and_maybe_remediate_gps_buffer())
+    parse_gps_buffer_as_gga();
+    if(gps_valid)
     {
-      parse_gps_buffer_as_gga();
-      if(gps_valid)
-      {
-        nmea_gga_timestamp = millis();
-      }
+      nmea_gga_timestamp = millis();
     }
     gps_read_buffer = b_string; 
   }
@@ -2128,13 +2125,10 @@ void parse_nmea_sentence()
     #endif
     b_string = gps_read_buffer;
     gps_read_buffer = nmea_read_buffer;
-    if(validate_and_maybe_remediate_gps_buffer())
+    parse_gps_buffer_as_rmc();
+    if(gps_valid)
     {
-      parse_gps_buffer_as_rmc();
-      if(gps_valid)
-      {
-        nmea_rmc_timestamp = millis();
-      }
+      nmea_rmc_timestamp = millis();
     }
     gps_read_buffer = b_string; 
   }
@@ -2303,7 +2297,10 @@ void parse_hsnmea_sentence()
   {
     a_string = nmea_read_buffer;
     nmea_read_buffer = hsnmea_read_buffer;
-    parse_nmea_sentence();
+    if(validate_nmea_buffer())
+    {
+      parse_nmea_sentence();
+    }
     nmea_read_buffer = a_string; 
   }
 
