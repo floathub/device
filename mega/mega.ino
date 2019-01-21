@@ -1470,7 +1470,8 @@ void gps_read()
           debug_info(F("--GPS BUF RMC--"));
           debug_info(gps_read_buffer);
           #endif
-          if(millis() - nmea_rmc_timestamp > nmea_sample_interval || millis() < nmea_sample_interval)
+          if(millis() - nmea_rmc_timestamp > nmea_sample_interval || 
+            (millis() < nmea_sample_interval && nmea_rmc_timestamp == 0))
 	  {
             #ifdef GPS_SOURCE_DEBUG_ON
             debug_info(F("GPS RMC INTERNAL"));
@@ -1485,7 +1486,8 @@ void gps_read()
           debug_info(F("--GPS BUF GGA--"));
           debug_info(gps_read_buffer);
           #endif
-          if(millis() - nmea_gga_timestamp > nmea_sample_interval || millis() < nmea_sample_interval)
+          if(millis() - nmea_gga_timestamp > nmea_sample_interval || 
+            (millis() < nmea_sample_interval && nmea_gga_timestamp == 0))
 	  {
             #ifdef GPS_SOURCE_DEBUG_ON
             debug_info(F("GPS GGA INTERNAL"));
