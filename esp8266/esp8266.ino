@@ -2717,6 +2717,7 @@ void echoNMEA(String a_message)
       (
         a_message.indexOf('A') == 1  ||
         a_message.indexOf('B') == 1  ||
+        a_message.indexOf('M') == 1  ||
         a_message.indexOf('S') == 1  
       )
      )
@@ -2731,6 +2732,7 @@ void echoNMEA(String a_message)
       (
         a_message.indexOf('A') == 1  ||
         a_message.indexOf('B') == 1  ||
+        a_message.indexOf('M') == 1  ||
         a_message.indexOf('S') == 1  
       )
      )
