@@ -57,13 +57,13 @@ String cellular_debug_string;
 #include <ESP8266mDNS.h>
 #include <EEPROM.h>
 #include <FS.h>
-#include "./libs/AES/AES.h"
-#include "./libs/Base64/Base64.h"
+#include "./src/libs/AES/AES.h"
+#include "./src/libs/Base64/Base64.h"
 #include "static.h"
 #include "version_defines.h"
 
 #ifdef CELLULAR_CODE_ON
-#include "./libs/SPISlave/SPISlave.h"
+#include <SPISlave.h>
 #endif
 
 
