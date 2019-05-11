@@ -1,7 +1,7 @@
 /*
 
  FloatHub ESP8266 Code
- (c) 2015-2018 Modiot Labs
+ (c) 2015-2019 Modiot Labs
  
 */
 
@@ -57,8 +57,8 @@ String cellular_debug_string;
 #include <ESP8266mDNS.h>
 #include <EEPROM.h>
 #include <FS.h>
-#include "./src/libs/AES/AES.h"
-#include "./src/libs/Base64/Base64.h"
+#include "src/libs/AES/AES.h"
+#include "src/libs/Base64/Base64.h"
 #include "static.h"
 #include "version_defines.h"
 
@@ -2353,7 +2353,16 @@ void popMessageQueue()
 
 #ifdef CELLULAR_CODE_ON
 
-void cellular_callback(uint8_t * data, size_t len)
+//
+//  The little "ICACHE_RAM_ATTR" is there to make sure this function is
+// _not_ cached in Flash.  Why?  Well ...  after many days of hair pulling
+// around instability issues with cellular, _finally_ figured out that if
+// some SPI/SPIFF operation is going on when this callback is fired from an
+// interrupt, and this function is cached in flash at the time, the board
+// resets itself (SPI is probably involved in flash access as well).
+//
+
+void ICACHE_RAM_ATTR cellular_callback(uint8_t * data, size_t len)
 {
   if(busy_doing_spiffs_stuff)
   {
@@ -2711,8 +2720,8 @@ void echoNMEA(String a_message)
       )                              &&
       phone_home_on == true          &&
       relay_ais_data == true         &&
-      low_file_pointer < 10	     &&
-      high_file_pointer < 10         &&
+      low_file_pointer == 0	     &&
+      high_file_pointer == 0         &&
       a_message.indexOf('!') == 0    &&
       (
         a_message.indexOf('A') == 1  ||
@@ -4031,7 +4040,7 @@ void fdrHouseKeeping()
     else if(current_communication_state == waiting_for_response)
     {
       unsigned long last_read = millis();
-      while (fdr_client.connected() && (millis() - last_read < 50))
+      while ( (fdr_client.connected() || fdr_client.available() ) && (millis() - last_read < 50))
       {
         while (fdr_client.available() && wifi_read_buffer.length() < MAX_WIFI_READ_BUFFER_SIZE)
         {

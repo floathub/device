@@ -1,7 +1,7 @@
 /*
 
  FloatHub Arduino Code
- (c) 2011-2018 Modiot Labs
+ (c) 2011-2019 Modiot Labs
  (begun June 6, 2011)
 
 
