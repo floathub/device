@@ -15,8 +15,9 @@ Particle.io (for FloatHub devices with cellular connectivity).  This code no
 longer uses the Hologram Dash which was briefly used as a cellular
 connectivity option.
 
-The ONLY TESTED AND RECOMMENDED build environment for this code is Arduino
-1.6.7 with the following serial buffer modifications:
+
+The current and recommended build environment for this code is Arduino 1.8.9
+with the following serial buffer modifications:
 
   HardwareSerial.h
 
@@ -50,11 +51,12 @@ should have the RX buffer changed from 64 bytes to 128 bytes as in:
 ESP8266 Libraries
 -----------------
 
-The currently recommended board library version is 2.4.1.
+The currently recommended board library version is 2.5.0
 
 
 
 Electron/Particle.io Libraries
 ------------------------------
 
-Built and tested with 0.7.0, which is the only recommended version.
+Built and tested with 1.0.1, which is the recommended version.
+

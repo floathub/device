@@ -125,13 +125,13 @@
 */
 
 #include <Wire.h>
-#include "./libs/Adafruit_BMP/Adafruit_BMP085.h"
-#include "./libs/Adafruit_BMP280/Adafruit_BMP280.h"
+#include "src/libs/Adafruit_BMP/Adafruit_BMP085.h"
+#include "src/libs/Adafruit_BMP280/Adafruit_BMP280.h"
 #include <EEPROM.h>
 #include <stdio.h>
-#include "./libs/Time/Time.h"
-#include "./libs/AES/AES.h"
-#include "./libs/Base64/Base64.h"
+#include "src/libs/Time/Time.h"
+#include "src/libs/AES/AES.h"
+#include "src/libs/Base64/Base64.h"
 #include <avr/wdt.h>
 #include <util/crc16.h>
 #include <SPI.h>
