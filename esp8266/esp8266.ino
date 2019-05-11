@@ -49,7 +49,7 @@ String cellular_debug_string;
 //
 
 #define MAX_COOKIES 10
-// #define CELLULAR_CODE_ON	
+#define CELLULAR_CODE_ON	
 
 
 #include <ESP8266WiFi.h>
@@ -2863,6 +2863,9 @@ void echoNMEA(String a_message)
 
     aes.clean();  //  Not sure if that does anything useful or not.   
 
+    #ifdef AISR_DEBUG_ON
+    debug_info("AIS relay exiting ");
+    #endif
   }
 }
 
@@ -3980,7 +3983,8 @@ void heartbeatHouseKeeping()
 
 void fdrHouseKeeping()
 {
-  if(WiFi.status() == WL_CONNECTED && WiFi.localIP() > 0)
+  //if(WiFi.status() == WL_CONNECTED && WiFi.localIP() > 0)
+  if(WiFi.status() == WL_CONNECTED && WiFi.localIP().isSet())
   {
     if(!called_mdns_after_connection)
     {
