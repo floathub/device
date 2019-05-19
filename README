@@ -51,7 +51,19 @@ should have the RX buffer changed from 64 bytes to 128 bytes as in:
 ESP8266 Libraries
 -----------------
 
-The currently recommended board library version is 2.5.0
+The currently recommended board library version is 2.5.1. The compile time settings in the Arduino environment are:
+
+Board:              Adafruit Feather HUZZAH ESP8266
+Upload Speed:       115200
+CPU Frequency:      80 MHz		
+Flash Size:	    4M (3M SPIFFS)
+Debug Port:         Disabled
+Debug Level:        None
+lwIP Variant:	    v1.4 Higher Bandwidth
+VTables:	    Flash
+Exceptions:         Disabled
+Erase Flash:        Only Sketch
+SSL Support:        All SSL ciphers (most compatible)
 
 
 

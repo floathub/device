@@ -49,7 +49,7 @@ String cellular_debug_string;
 //
 
 #define MAX_COOKIES 10
-#define CELLULAR_CODE_ON	
+//#define CELLULAR_CODE_ON	
 
 
 #include <ESP8266WiFi.h>
@@ -57,6 +57,7 @@ String cellular_debug_string;
 #include <ESP8266mDNS.h>
 #include <EEPROM.h>
 #include <FS.h>
+#include <WiFiUdp.h>
 #include "src/libs/AES/AES.h"
 #include "src/libs/Base64/Base64.h"
 #include "static.h"
@@ -141,6 +142,7 @@ bool    force_wifi_connect;			// default: no
 unsigned int  nmea_mux_port;			// default: 2319
 String	web_interface_username;			// default: floathub
 String	web_interface_password;			// default: floathub
+unsigned int  udp_broadcast_port;		// default: 2000
 
 
 //
@@ -163,6 +165,7 @@ unsigned long boot_counter;
 #define MAX_LATEST_MESSAGE_SIZE 512
 String latest_message_to_send = "";
 WiFiClient fdr_client;
+WiFiUDP    udp;
 
 #define MAX_WIFI_READ_BUFFER_SIZE 32
 String wifi_read_buffer;
@@ -192,6 +195,8 @@ bool cellular_link_ready = 0;
 String cellular_provider;
 String sim_card_number;
 String latest_cellular_message_to_send = "";
+String cellular_over_spi_message = "";
+String cellular_sub_message = "";
 #endif
 
 //
@@ -282,14 +287,22 @@ bool busy_doing_spiffs_stuff = false;
 
 void startNoInterrupts()
 {
-  noInterrupts();
+
+  #ifdef CELLULAR_CODE_ON
+  SPISlave.end();
+  #endif
+  //noInterrupts();
   busy_doing_spiffs_stuff = true; 
+
 }
 
 void endNoInterrupts()
 {
-  interrupts();
+  //interrupts();
   busy_doing_spiffs_stuff = false; 
+  #ifdef CELLULAR_CODE_ON
+  SPISlave.begin();
+  #endif
 }
 
 void help_info(String some_info)
@@ -574,7 +587,10 @@ void init_eeprom_memory()
   EEPROM.write(325, 1);
   EEPROM.write(326, 0);
   EEPROM.write(327, 0);
- 
+
+  EEPROM.write(328, 7);		// UDP broadcast default of 2000
+  EEPROM.write(329, 208); 	//
+
   //
   // Web interface username and password
   //
@@ -686,7 +702,7 @@ void write_eeprom_memory()
   }
 
   //
-  // NMEA muxer flag and port
+  // NMEA muxer flag, port broadcast UDP, etc.
   //
 
   EEPROM.write(251, nmea_mux_on);
@@ -696,6 +712,8 @@ void write_eeprom_memory()
   EEPROM.write(325, relay_ais_data);
   EEPROM.write(326, relay_ais_cellular);
   EEPROM.write(327, force_wifi_connect);
+  EEPROM.write(328, highByte(udp_broadcast_port));
+  EEPROM.write(329, lowByte(udp_broadcast_port));
  
   //
   // Web interface username and password
@@ -826,6 +844,8 @@ void read_eeprom_memory()
   relay_ais_data = EEPROM.read(325);
   relay_ais_cellular = EEPROM.read(326);
   force_wifi_connect = EEPROM.read(327);
+  udp_broadcast_port  = EEPROM.read(329);
+  udp_broadcast_port += EEPROM.read(328) * 256;
   
   //
   //  Phone home?
@@ -1322,6 +1342,8 @@ void kickMDNS(bool ap_side = false)
 
 void kickWiFi(bool ap_only=false)
 {
+  startNoInterrupts();
+
   WiFi.disconnect();
   WiFi.mode(WIFI_OFF);
   delay(500);
@@ -1348,8 +1370,10 @@ void kickWiFi(bool ap_only=false)
     WiFi.mode(WIFI_AP_STA);
     WiFi.begin(public_wifi_ssid.c_str(), public_wifi_password.c_str());
     WiFi.softAP(private_wifi_ssid.c_str(), private_wifi_password.c_str());
+    
+
     byte attempts = 0; 
-    while (WiFi.status() != WL_CONNECTED && attempts < 24)
+    while (WiFi.status() != WL_CONNECTED && attempts < 24 && public_ip_is_static)
     { 
       delay(250);
       attempts++;
@@ -1367,7 +1391,8 @@ void kickWiFi(bool ap_only=false)
   }
 
   called_mdns_after_connection = false;
-	  
+
+  endNoInterrupts();
 }
 
 
@@ -1658,6 +1683,12 @@ void handleOther()
       something_changed = true;
       nmea_changed = true;
     }
+    if(udp_broadcast_port != web_server.arg("udpport").toInt())
+    {
+      udp_broadcast_port = web_server.arg("udpport").toInt();
+      checkPort(udp_broadcast_port);
+      something_changed = true;
+    }
     if(web_server.arg("localname").length() < 1)
     {
       error_message += ".local name cannot be blank";
@@ -1710,6 +1741,8 @@ void handleOther()
   page += "><br>";
   page += "<label for='muxport'>NMEA Port: </label>";
   page += "<input type='number' name='muxport' length='5' maxlength='5' value='" + String(nmea_mux_port) + "' ><br>";
+  page += "<label for='udpport'>Broadcast Port: </label>";
+  page += "<input type='number' name='udpport' length='5' maxlength='5' value='" + String(udp_broadcast_port) + "' ><br>";
   page += "<label for='muxprivate'>Only Private NMEA: </label>";
   page += "<input type='checkbox' name='muxprivate' value='yes'";
   if(nmea_mux_private)
@@ -1717,6 +1750,7 @@ void handleOther()
     page += " checked";
   }
   page += "><br>";
+
   page += "<label for='relayais'>Relay AIS: </label>";
   page += "<input type='checkbox' name='relayais' value='yes'";
   if(relay_ais_data)
@@ -2154,6 +2188,7 @@ void displayCurrentVariables()
   help_info(String(F("D=")) + public_static_dns.toString()); 
   help_info(String(F("N=")) + nmea_mux_on); 
   help_info(String(F("n=")) + nmea_mux_port); 
+  help_info(String(F("b=")) + udp_broadcast_port); 
   help_info(String(F("e=")) + nmea_mux_private); 
   help_info(String(F("r=")) + relay_ais_data); 
   #ifdef CELLULAR_CODE_ON
@@ -2364,20 +2399,23 @@ void popMessageQueue()
 
 void ICACHE_RAM_ATTR cellular_callback(uint8_t * data, size_t len)
 {
+
+
   if(busy_doing_spiffs_stuff)
   {
     return;
   }
+
   //
-  // We have received this message, describing the status of the cellular
+  // We have received a message, describing the status of the cellular
   // modem
   //	
 
-  String message = String((char *)data);
-  #ifdef CELL_DEBUG_ON
-  cellular_debug_string = String(F("Cell in: ")) + message;
-  #endif
+  cellular_over_spi_message = String((char *)data);
 
+  #ifdef CELL_DEBUG_ON
+  cellular_debug_string = String(F("Cell in: ")) + cellular_over_spi_message;
+  #endif
 
   //
   // The message can be anything like:
@@ -2392,21 +2430,21 @@ void ICACHE_RAM_ATTR cellular_callback(uint8_t * data, size_t len)
   // good as long as first character of message is an L
   // 
 
-  if(message.length() > 1 && message.charAt(0) == 'L')
+  if(cellular_over_spi_message.length() > 1 && cellular_over_spi_message.charAt(0) == 'L')
   {
     cellular_link_up = true;
     cellular_link_timestamp = millis();
-    if(message.length() > 3)
+    if(cellular_over_spi_message.length() > 3)
     {
-      sim_card_number = message.substring(3, message.indexOf(' ', 3));
-      cellular_provider = message.substring(message.indexOf(' ', 3) + 1);
+      sim_card_number = cellular_over_spi_message.substring(3, cellular_over_spi_message.indexOf(' ', 3));
+      cellular_provider = cellular_over_spi_message.substring(cellular_over_spi_message.indexOf(' ', 3) + 1);
     }
     else
     {
       cellular_provider = F("Unknown");
       sim_card_number = F("Unknown");
     }
-    if(message.length() > 2 && message.charAt(1) == 'U')
+    if(cellular_over_spi_message.length() > 2 && cellular_over_spi_message.charAt(1) == 'U')
     {
       cellular_link_ready = true;
     }
@@ -2433,8 +2471,8 @@ void ICACHE_RAM_ATTR cellular_callback(uint8_t * data, size_t len)
   {
     if(latest_cellular_message_to_send.length() > 32)
     {
-      String sub_message = latest_cellular_message_to_send.substring(0,32);
-      SPISlave.setData(sub_message.c_str());
+      cellular_sub_message = latest_cellular_message_to_send.substring(0,32);
+      SPISlave.setData(cellular_sub_message.c_str());
       latest_cellular_message_to_send = latest_cellular_message_to_send.substring(32);
     }
     else
@@ -2458,7 +2496,7 @@ void setup_spi_slave_to_cellular()
   // handle that incoming data (called on an interrupt) with this function:
   //
 
-  SPISlave.onData(cellular_callback);
+  SPISlave.onData(&cellular_callback);
 
   //
   // Call library setup, set our own flag
@@ -2654,16 +2692,23 @@ void setup(void)
   //  If we are celullar, need to set up some SPI Slave methods
   //
   #ifdef CELLULAR_CODE_ON
+
   setup_spi_slave_to_cellular();
   latest_cellular_message_to_send.reserve(MAX_LATEST_MESSAGE_SIZE);
   latest_cellular_message_to_send = "";
+  cellular_link_up = 0;
+  cellular_over_spi_message.reserve(64);
+  cellular_sub_message.reserve(64);
+
   #endif
+
 }
 
 
 bool openFdr()
 {
 
+  startNoInterrupts();
 
   // Open a connection to the FloatHub Data Receiver server (usually fdr.floathub.net)
 
@@ -2677,6 +2722,7 @@ bool openFdr()
     #ifdef WIFI_DEBUG_ON
     debug_info(F("Success "));
     #endif
+    endNoInterrupts();
     return true;
   }
   else
@@ -2684,8 +2730,10 @@ bool openFdr()
     #ifdef WIFI_DEBUG_ON
     debug_info(F("Failure "));
     #endif
+    fdr_client.stop();
   }
 
+  endNoInterrupts();
   return false;
 }
 
@@ -2707,6 +2755,32 @@ void echoNMEA(String a_message)
   }
 
   //
+  // If our UDP broadcast port is non-zero, we should blast this out on UDP
+  // broadcast as well
+  //
+
+  if(udp_broadcast_port > 0 )
+  {
+    //
+    // "Public" network
+    //
+
+    IPAddress IP_broadcast = ~uint32_t(WiFi.subnetMask()) | uint32_t(WiFi.gatewayIP());
+    udp.beginPacket(IP_broadcast, udp_broadcast_port);
+    udp.write(a_message.c_str());
+    udp.endPacket();
+
+    //
+    // "Private" network
+    //
+
+    IP_broadcast = IPAddress(192, 168, 4, 255);
+    udp.beginPacket(IP_broadcast, udp_broadcast_port);
+    udp.write(a_message.c_str());
+    udp.endPacket();
+  }
+
+  //
   // If we're phoning home AND relay AIS is set on AND this looks like AIS,
   // and we're not backed up with regular messages, send pretty much a raw
   // AIS string up to the fdr server
@@ -2717,31 +2791,33 @@ void echoNMEA(String a_message)
       (
         WiFi.status() == WL_CONNECTED ||
         ( cellular_link_up && cellular_link_ready && relay_ais_cellular && latest_cellular_message_to_send.length() == 0 )
-      )                              &&
-      phone_home_on == true          &&
-      relay_ais_data == true         &&
-      low_file_pointer == 0	     &&
-      high_file_pointer == 0         &&
-      a_message.indexOf('!') == 0    &&
+      )                                   &&
+      current_communication_state == idle &&
+      phone_home_on == true               &&
+      relay_ais_data == true              &&
+      low_file_pointer == 0	          &&
+      high_file_pointer == 0              &&
+      a_message.indexOf('!') == 0         &&
       (
-        a_message.indexOf('A') == 1  ||
-        a_message.indexOf('B') == 1  ||
-        a_message.indexOf('M') == 1  ||
+        a_message.indexOf('A') == 1       ||
+        a_message.indexOf('B') == 1       ||
+        a_message.indexOf('M') == 1       ||
         a_message.indexOf('S') == 1  
       )
      )
   #else
   if(
-      WiFi.status() == WL_CONNECTED  &&
-      phone_home_on == true          &&
-      relay_ais_data == true         &&
-      low_file_pointer < 10	     &&
-      high_file_pointer < 10         &&
-      a_message.indexOf('!') == 0    &&
+      WiFi.status() == WL_CONNECTED       &&
+      current_communication_state == idle &&
+      phone_home_on == true               &&
+      relay_ais_data == true              &&
+      low_file_pointer < 10	          &&
+      high_file_pointer < 10              &&
+      a_message.indexOf('!') == 0         &&
       (
-        a_message.indexOf('A') == 1  ||
-        a_message.indexOf('B') == 1  ||
-        a_message.indexOf('M') == 1  ||
+        a_message.indexOf('A') == 1       ||
+        a_message.indexOf('B') == 1       ||
+        a_message.indexOf('M') == 1       ||
         a_message.indexOf('S') == 1  
       )
      )
@@ -3627,6 +3703,27 @@ void parseInput(String &the_input)
   }
   #endif
 
+  else if(the_input.startsWith("b=") && the_input.length() >= 3)
+  {
+    int new_value = the_input.substring(2).toInt();
+    if(new_value > 0 && new_value < 65535)
+    { 	
+      processNewPortValue("b=", udp_broadcast_port, new_value);
+    }
+    #ifdef INPT_DEBUG_ON
+    else
+    {
+      debug_info(F("Bad number"));
+    }
+    #endif
+  }
+  #ifdef INPT_DEBUG_ON
+  else if(the_input.startsWith("b="))
+  {
+    debug_info(F("Short input"));
+  }
+  #endif
+
   else if(the_input.startsWith("u=") && the_input.length() >= 6)
   {        
     processNewStringValue("u=", web_interface_username, the_input.substring(2));
@@ -3992,6 +4089,7 @@ void heartbeatHouseKeeping()
 
 void fdrHouseKeeping()
 {
+  
   //if(WiFi.status() == WL_CONNECTED && WiFi.localIP() > 0)
   if(WiFi.status() == WL_CONNECTED && WiFi.localIP().isSet())
   {
@@ -4030,10 +4128,6 @@ void fdrHouseKeeping()
             #endif
             fdr_client.stop();
           }
-        }
-        else
-        {
-          fdr_client.stop();
         }
       }
     }
@@ -4085,9 +4179,9 @@ void fdrHouseKeeping()
         latest_message_to_send = "";
         popMessageQueue();
 
-        if(latest_message_to_send.length() > 0)
+        if(latest_message_to_send.length())
         {
-          if(push_latest_message_out_socket())
+          if(fdr_client.connected() && push_latest_message_out_socket())
           {
             #ifdef WIFI_DEBUG_ON
             debug_info(F("wifi more FHx"));
@@ -4102,6 +4196,7 @@ void fdrHouseKeeping()
             #endif
             fdr_client.stop();
             current_communication_state = idle;
+            wifi_read_buffer = "";
           }
 
         }
