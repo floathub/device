@@ -35,3 +35,13 @@ To see debugging output:
 
   particle serial monitor
 
+=================================================================================
+
+Updated Version:
+
+particle update 
+particle flash --usb electron-system-part3\@1.2.1+debug.bin
+particle flash --usb electron-system-part2\@1.2.1+debug.bin 
+particle flash --usb electron-system-part1\@1.2.1+debug.bin 
+particle flash --serial electron.bin.git_version 
+

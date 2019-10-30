@@ -20,7 +20,7 @@ SYSTEM_MODE(MANUAL);
 // Global defines
 //
 
-//#define DEBUG_ON
+#define DEBUG_ON
 #define MAX_LATEST_MESSAGE_SIZE      512
 #define HOUSEKEEPING_INTERVAL        1000      // Check our network status and do other core tasks once every second
 #define CONNECTION_ATTEMPT_INTERVAL  10000     // If we don't have a connection, how long do we wait between attempts
@@ -408,6 +408,19 @@ void do_housekeeping()
       #endif
       Particle.connect();
       connection_attempt_timestamp = millis();
+    }
+
+    //
+    // COWABUNGA
+    //
+    else
+    {
+      Serial.print("NOT ATTEMPTING Particle.connect() because ");
+      Serial.print(millis()); 
+      Serial.print(" - ");
+      Serial.print(connection_attempt_timestamp);
+      Serial.print(" !> ");
+      Serial.println(CONNECTION_ATTEMPT_INTERVAL);
     }
   }
     
