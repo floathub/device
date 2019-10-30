@@ -274,9 +274,9 @@ String	virtual_serial_read_buffer;
 //
 
 unsigned watchdog_timestamp;
-#define  WATCHDOG_TIME_LIMIT 21600000UL		    // If we do not manage to get any data through to FDR after 6 hours, reboot the whole shebang 
-#define  WATCHDOG_USE_CELLULAR_TIME_LIMIT 30000UL   // After boot up, give it 30 seconds
-
+#define  WATCHDOG_TIME_LIMIT 21600000UL		        // If we do not manage to get any data through to FDR after 6 hours, reboot the whole shebang 
+#define  WATCHDOG_USE_CELLULAR_TIME_LIMIT 30000UL       // After boot up, give it 30 seconds
+#define  WATCHDOG_WIFI_NOT_WORKING_TIME_LIMIT 900000UL  // If we have WiFi, but nothing is getting through, use cellular if possible after 15 mins.
 
 //
 //  Flag to signal that we need to jump out of any SIPSlave callbacks
@@ -4269,6 +4269,56 @@ void fdrHouseKeeping()
     }
     #endif
   }
+
+  //
+  //  Also check for the case where we have WiFi, but nothing seems to be
+  // getting through (e.g. a captive-portal type problem)
+  //
+
+
+   #ifdef CELLULAR_CODE_ON
+   if ( 
+        millis() - watchdog_timestamp > WATCHDOG_WIFI_NOT_WORKING_TIME_LIMIT &&
+	cellular_link_up == true &&
+	cellular_link_ready == true &&
+        phone_home_on == true &&
+        latest_message_to_send.length() > 0 &&
+        latest_cellular_message_to_send.length() == 0
+       )
+   {
+     #ifdef CELL_DEBUG_ON
+     debug_info(F("Cell via WiFi Timeout"));
+     #endif
+     latest_cellular_message_to_send = latest_message_to_send + "\r\n";
+     latest_message_to_send = "";
+
+     if(latest_message_from_file)
+     {
+       if(low_file_pointer > 0)
+       {
+         if(!nukeOldestFile())
+         {
+	   #ifdef FILE_DEBUG_ON
+           debug_info(F("HouseK failed to Nuke, BAD"));
+           #endif
+           initFileSystem();
+           low_file_pointer = 0;
+           high_file_pointer = 0;
+         }
+         else if(low_file_pointer > high_file_pointer)
+         {
+	   // We have emptied the queue ..
+           low_file_pointer = 0;
+           high_file_pointer = 0;
+	 }
+       }
+     }
+     popMessageQueue();
+    }
+    #endif
+
+
+
 }
 
 
