@@ -2078,6 +2078,7 @@ void parse_nmea_sentence()
   #endif    
 
   int commas[8] = {-1, -1, -1, -1, -1, -1, -1 , -1};
+  float temp_float = 0.0;
 
   if(nmea_read_buffer.length() < 10 	||
      nmea_read_buffer.indexOf('$') != 0	||
@@ -2153,10 +2154,10 @@ void parse_nmea_sentence()
 
   else if( popout_nmea_value(F("DPT"), commas[0], commas[1], nmea_depth_water))
   {
-    float offset = 0.0;
-    if( popout_nmea_value(F("DPT"), commas[1], commas[2], offset))
+    temp_float = 0.0;
+    if( popout_nmea_value(F("DPT"), commas[1], commas[2], temp_float))
     {
-      nmea_depth_water += offset;
+      nmea_depth_water += temp_float;
     }
     #ifdef NMEA_DEBUG_ON
     debug_info(F("NMEA dpt water:"), nmea_depth_water);
@@ -2193,18 +2194,37 @@ void parse_nmea_sentence()
   //	Wind Speed and direction if speed works
   //
   
-  else if(  popout_nmea_value(F("MWV"), commas[2], commas[3], nmea_wind_speed))
+  else if( popout_nmea_value(F("MWV"), commas[2], commas[3], temp_float))
   {
-    #ifdef NMEA_DEBUG_ON
-    debug_info(F("NMEA w speed:"), nmea_wind_speed);
-    #endif
-    nmea_wind_speed_timestamp = millis();
-    if(	popout_nmea_value(F("MWV"), commas[0], commas[1], nmea_wind_direction))
+    if( nmea_read_buffer[commas[1] + 1] == 'R' && nmea_read_buffer[commas[4] + 1] == 'A')
     {
+      nmea_wind_speed = temp_float;
+      char speed_units = nmea_read_buffer[commas[3] + 1];
+      
+      if(speed_units == "K")
+      {
+        nmea_wind_speed = nmea_wind_speed * 0.539957;
+      }
+      else if(speed_units == "M")
+      {
+        nmea_wind_speed = nmea_wind_speed * 1.94384;
+      }
+      else if(speed_units == "S")
+      {
+        nmea_wind_speed = nmea_wind_speed * 0.868976;
+      }
+
       #ifdef NMEA_DEBUG_ON
-      debug_info(F("NMEA w direction:"), nmea_wind_direction);
+      debug_info(F("NMEA w speed:"), nmea_wind_speed);
       #endif
-      nmea_wind_direction_timestamp = millis();
+      nmea_wind_speed_timestamp = millis();
+      if( popout_nmea_value(F("MWV"), commas[0], commas[1], nmea_wind_direction))
+      {
+        #ifdef NMEA_DEBUG_ON
+        debug_info(F("NMEA w direction:"), nmea_wind_direction);
+        #endif
+        nmea_wind_direction_timestamp = millis();
+      }
     }
   }
 
