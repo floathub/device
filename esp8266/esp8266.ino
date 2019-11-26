@@ -1340,7 +1340,7 @@ void kickMDNS(bool ap_side = false)
 }
 
 
-void kickWiFi(bool ap_only=false)
+void kickWiFi(bool ap_only=false, bool open_network=false)
 {
   startNoInterrupts();
 
@@ -1368,7 +1368,14 @@ void kickWiFi(bool ap_only=false)
     tried_public_wifi_recently = true;
     WiFi.setAutoConnect(true);
     WiFi.mode(WIFI_AP_STA);
-    WiFi.begin(public_wifi_ssid.c_str(), public_wifi_password.c_str());
+    if(open_network)
+    {
+      WiFi.begin(public_wifi_ssid.c_str());
+    }
+    else
+    {
+      WiFi.begin(public_wifi_ssid.c_str(), public_wifi_password.c_str());
+    }
     WiFi.softAP(private_wifi_ssid.c_str(), private_wifi_password.c_str());
     
 
@@ -2625,7 +2632,7 @@ void setup(void)
   // Fire up the WiFi
   //
 
-  kickWiFi(true);
+  kickWiFi(true, false);
 
   //
   // Bring up the web server
@@ -4003,6 +4010,7 @@ void WiFiHouseKeeping()
   if(wifi_housekeeping_cycle_counter == 10 )
   {
     bool saw_public = false;    
+    bool public_is_open = false;
     byte numSsid = WiFi.scanNetworks();
 
     for (int i = 0; i < numSsid; i++)
@@ -4010,6 +4018,10 @@ void WiFiHouseKeeping()
       if (public_wifi_ssid == String(WiFi.SSID(i)))
       {
         saw_public = true;
+        if (WiFi.encryptionType(i) == ENC_TYPE_NONE)
+        {
+	  public_is_open = true;
+        }
         break;
       }
     }
@@ -4026,7 +4038,7 @@ void WiFiHouseKeeping()
       #ifdef WIFI_DEBUG_ON
       debug_info(F("WiFi HK: Trying Public"));
       #endif
-      kickWiFi();
+      kickWiFi(false, public_is_open);
     }
     else
     {
