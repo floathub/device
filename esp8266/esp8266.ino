@@ -1442,23 +1442,26 @@ void handlePublicWireless()
       {
         if(web_server.arg("pubadd") == "dynamic")
         {
+          bool wifi_is_open = true;
           public_ip_is_static = false;
           // Set Public Wireless for DHCP
           public_wifi_ssid = web_server.arg("pubssid");
           if(web_server.arg("pubpassone").length() > 1 )
           {
               public_wifi_password = web_server.arg("pubpassone");
+	      wifi_is_open = false;
           }
           
           write_eeprom_memory();
           sendPleaseWait("/public");
- 	  kickWiFi();
+ 	  kickWiFi(false, wifi_is_open);
           return;
         }
         else
         {
           // Set Public Wireless for Static 
 
+          bool wifi_is_open = true;
           public_ip_is_static = true;
           public_wifi_ssid = web_server.arg("pubssid");
           //
@@ -1468,6 +1471,7 @@ void handlePublicWireless()
           if(web_server.arg("pubpassone").length() > 1 )
           {
               public_wifi_password = web_server.arg("pubpassone");
+	      wifi_is_open = false;
           }
 
           public_static_ip   = IPAddress(web_server.arg("local1").toInt(), web_server.arg("local2").toInt(), web_server.arg("local3").toInt(), web_server.arg("local4").toInt());
@@ -1478,7 +1482,7 @@ void handlePublicWireless()
 
           write_eeprom_memory();
           sendPleaseWait("http://" + public_static_ip.toString() + "/public");
-          kickWiFi();
+          kickWiFi(false, wifi_is_open);
           return;
         }
       }
@@ -4031,7 +4035,7 @@ void WiFiHouseKeeping()
       #ifdef WIFI_DEBUG_ON
       debug_info(F("WiFi HK: Forced Public"));
       #endif
-      kickWiFi();
+      kickWiFi(false, public_is_open);
     }
     else if(saw_public)
     {
