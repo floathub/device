@@ -223,7 +223,7 @@ String new_message = "";
 String a_string = "";
 String b_string = "";
 char   temp_string[20];  
-
+String mac_address;
 
 /*
   Handy variables to use at various stages (better to be global, less memory)
@@ -640,6 +640,8 @@ void setup()
   latest_message_to_send.reserve(MAX_LATEST_MESSAGE_SIZE);
   a_string.reserve(MAX_LATEST_MESSAGE_SIZE);
   b_string.reserve(MAX_GPS_BUFFER);
+  mac_address.reserve(32);
+  mac_address = "";
 
   //
   //  Do we put out FHA/FHB/FHC messages on the console?
@@ -1585,7 +1587,13 @@ void individual_pump_read(int pump_number, pump_state &state, int analog_input)
        new_message += F(",P");
        new_message += pump_number;
        new_message += F(":1");
-       
+
+       if(float_hub_id == "factoryX" and mac_address.length() == 12)
+       {
+         new_message += F(",I:");
+         new_message += mac_address;
+       }       
+
        latest_message_to_send = new_message;
        encode_latest_message_to_send();
        send_encoded_message_to_esp8266();
@@ -1617,6 +1625,12 @@ void individual_pump_read(int pump_number, pump_state &state, int analog_input)
        new_message += F(",P");
        new_message += pump_number;
        new_message += F(":0");
+
+       if(float_hub_id == "factoryX" and mac_address.length() == 12)
+       {
+         new_message += F(",I:");
+         new_message += mac_address;
+       }       
 
        latest_message_to_send = new_message;
        encode_latest_message_to_send();
@@ -1680,6 +1694,12 @@ void report_state(bool console_only)
   if(gps_valid == true || timeStatus() != timeNotSet )
   {
      add_timestamp_to_string(new_message);
+  }
+
+  if(mac_address.length() == 12 && ( float_hub_id == "factoryX" || random(0, 100) < 3))
+  {
+    new_message += F(",I:");
+    new_message += mac_address;
   }
   
   new_message += F(",T:");
@@ -1821,6 +1841,10 @@ void parse_esp8266()
       {
         write_eeprom_memory();
       }
+    }
+    else if(esp8266_read_buffer.length() >= 34 && esp8266_read_buffer.substring(20).startsWith(F("m=")))
+    { 
+      mac_address = esp8266_read_buffer.substring(22,34);
     }
   }
   else

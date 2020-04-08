@@ -121,7 +121,7 @@ IPAddress public_static_ip;
 IPAddress public_static_gate;
 IPAddress public_static_mask;
 IPAddress public_static_dns;
-
+String mac_address;
 
 //
 //	Account Related 
@@ -2214,6 +2214,7 @@ void displayCurrentVariables()
 
   help_info(String(F("WiFi-IP: ")) + WiFi.localIP().toString()); 
   help_info(String(F("  AP-IP: ")) + WiFi.softAPIP().toString()); 
+  help_info(String(F("    Mac: ")) + mac_address); 
 
   displayUptime();
   
@@ -2713,6 +2714,24 @@ void setup(void)
 
   #endif
 
+  //
+  //  Figure out what our MAC address is (we use this as a unique
+  // identifier).
+  //
+
+  byte mac_array[6];
+  WiFi.macAddress(mac_array);
+
+  mac_address = "";
+  
+  for( byte i=0; i < 6; i++)
+  {
+    if(mac_array[i] < 16)
+    {
+      mac_address += "0";
+    }
+    mac_address += String(mac_array[i], HEX);
+  }
 }
 
 
@@ -2837,6 +2856,20 @@ void echoNMEA(String a_message)
     String string_to_send = F("$FHO:");
     string_to_send += float_hub_id + ":" ;
     string_to_send += String(FLOATHUB_PROTOCOL_VERSION) + "$,";
+
+    //
+    // Special case: if we are factoryX default and have a mac_address,
+    // prefix that before the AIS data
+    //
+
+    if(float_hub_id == "factoryX" and mac_address.length() == 12)
+    {
+      string_to_send += F("I:");
+      string_to_send += mac_address;
+      string_to_send += F(",");
+    }       
+
+
     string_to_send += a_message;
 
     #ifdef AISR_DEBUG_ON
@@ -4082,20 +4115,24 @@ void heartbeatHouseKeeping()
     }
     internal_info(String(F("c=")) + public_wifi_status);
   }
+  else if(heartbeat_cycle == 3)
+  {
+    internal_info(String(F("m=")) + mac_address);
+  }
 
   #ifdef CELLULAR_CODE_ON
-  else if(heartbeat_cycle == 3)
+  else if(heartbeat_cycle == 4)
   {
     internal_info(String(F("d=")) + cellular_link_up); 
   }
   heartbeat_cycle++;
-  if(heartbeat_cycle >=4)
+  if(heartbeat_cycle >=5)
   {
     heartbeat_cycle = 0;
   }
   #else
   heartbeat_cycle++;
-  if(heartbeat_cycle >=3)
+  if(heartbeat_cycle >=4)
   {
     heartbeat_cycle = 0;
   }
