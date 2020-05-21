@@ -368,8 +368,15 @@ void do_housekeeping()
 	case NET_ACCESS_TECHNOLOGY_LTE:
           network_type = "LTE";
           break;
+	case NET_ACCESS_TECHNOLOGY_LTE_CAT_M1:
+          network_type = "LTE-M1";
+          break;
+	case NET_ACCESS_TECHNOLOGY_LTE_CAT_NB1:
+          network_type = "LTE-NB1";
+          break;
         default:
-          network_type = "PARTICLE";
+          //network_type = "PARTICLE";
+          network_type = "OK";
       }
     }
   }
@@ -464,6 +471,7 @@ void setup()
   Serial.begin(115200);
   delay(1000);
   SPI.begin(SPI_MODE_MASTER);
+  SPI.setClockSpeed(4, MHZ); // Explicitly set clock speed
   //delay(5000); // Make sure the ESP8266 has time to boot first
 
   #ifdef DEBUG_ON
