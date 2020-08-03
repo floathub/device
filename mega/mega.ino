@@ -125,8 +125,9 @@
 */
 
 #include <Wire.h>
-#include "src/libs/Adafruit_BMP/Adafruit_BMP085.h"
-#include "src/libs/Adafruit_BMP280/Adafruit_BMP280.h"
+//#include "src/libs/Adafruit_BMP/Adafruit_BMP085.h"
+//#include "src/libs/Adafruit_BMP280/Adafruit_BMP280.h"
+#include "src/libs/Adafruit_BME280/Adafruit_BME280.h"
 #include <EEPROM.h>
 #include <stdio.h>
 #include "src/libs/Time/Time.h"
@@ -303,9 +304,9 @@ bool currently_active = true;
   We use I2C (Wire.h) for Pressure and Temp
 */
 
-Adafruit_BMP085 bmp;
-Adafruit_BMP280 bmp280;
-bool using_bmp280 = false;
+// Adafruit_BMP085 bmp;
+// Adafruit_BMP280 bmp280;
+Adafruit_BME280 bme;
 #define BARO_HISTORY_LENGTH 10
 #define TEMPERATURE_BIAS 5	//  degrees F that BMP, on average, over reports temperature by
 float temperature;
@@ -402,16 +403,13 @@ void print_free_memory()
   Setup for barometric and temperature
 */
 
-void bmp_setup()
+void bme_setup()
 {
-  if(bmp280.begin())
+  if(!bme.begin())
   {
-    using_bmp280 = true;
-  }
-  else
-  {
-    using_bmp280 = false;
-    bmp.begin();
+    #ifdef BARO_DEBUG_ON
+    debug_info("Failed !!! to initialize BME280");
+    #endif
   }
   for(i = 0; i < BARO_HISTORY_LENGTH; i++)
   {
@@ -630,7 +628,6 @@ void resetESP()
 
 void setup()
 {
-
   console_read_buffer.reserve(MAX_CONSOLE_BUFFER);
   esp8266_read_buffer.reserve(MAX_CONSOLE_BUFFER);
   gps_read_buffer.reserve(MAX_GPS_BUFFER);
@@ -679,7 +676,7 @@ void setup()
   //  Misc setup
   //
 
-  bmp_setup();
+  bme_setup();
   gps_setup();
   latest_message_to_send = "";
   send_message_failures = 0;
@@ -742,7 +739,7 @@ void setup()
   //  Do one sensor read for temperature and barometric so first console messages have this data
   //
   
-  bmp_read();
+  bme_read();
   
   //
   //	Setup hardware watchdog timer 
@@ -861,7 +858,7 @@ void add_checksum_and_send_nmea_string(String nmea_string)
 
 }
 
-void bmp_read()
+void bme_read()
 {
 
   //
@@ -882,14 +879,7 @@ void bmp_read()
     temperature_history[i] = temperature_history[i+1];
   }
 
-  if(using_bmp280)
-  {
-    temperature_history[BARO_HISTORY_LENGTH - 1] = (1.8 * bmp280.readTemperature()) + 32 - TEMPERATURE_BIAS ;
-  }
-  else
-  {
-    temperature_history[BARO_HISTORY_LENGTH - 1] = (1.8 * bmp.readTemperature()) + 32 - TEMPERATURE_BIAS ;
-  }
+  temperature_history[BARO_HISTORY_LENGTH - 1] = (1.8 * bme.readTemperature()) + 32 - TEMPERATURE_BIAS ;
 
   if(handy > 0)
   {
@@ -928,14 +918,7 @@ void bmp_read()
     pressure_history[i] = pressure_history[i+1];
   }
 
-  if(using_bmp280)
-  {
-    pressure_history[BARO_HISTORY_LENGTH - 1] = bmp280.readPressure() * 0.000295300;
-  }
-  else
-  {
-    pressure_history[BARO_HISTORY_LENGTH - 1] = bmp.readPressure() * 0.000295300;
-  }
+  pressure_history[BARO_HISTORY_LENGTH - 1] = bme.readPressure() * 0.000295300;
 
   if(handy > 0)
   {
@@ -2724,7 +2707,7 @@ void loop()
   if(current_timestamp - sensor_previous_timestamp >  sensor_sample_interval)
   {
     sensor_previous_timestamp = current_timestamp;
-    bmp_read();
+    bme_read();
   } 
 
   if(current_timestamp - voltage_previous_timestamp >  voltage_interval)
