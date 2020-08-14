@@ -31,7 +31,7 @@
 //#define WIFI_DEBUG_ON
 //#define FILE_DEBUG_ON
 //#define FILE_SERVE_ON	// Useful when debuggig to see SPIFF files from a browser
-//#define CELL_DEBUG_ON
+#define CELL_DEBUG_ON
 //#define AISR_DEBUG_ON
 
 //
@@ -4425,7 +4425,7 @@ void readConsole()
   // to be some cellular debugging output, show it
   //
 
-  #ifdef CELL_DEBUG_ON
+  #ifdef CELL_DEBUG_ONk
   if(cellular_debug_string.length() > 0)
   {
     debug_info(cellular_debug_string);
