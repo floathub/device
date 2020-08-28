@@ -126,16 +126,20 @@
 
 #define BARO_HWARE_BMP280 1
 #define BARO_HWARE_BME280 2
+#define BARO_HWARE_BME680 3
 
-#define BARO_HWARE BARO_HWARE_BMP280
+//#define BARO_HWARE BARO_HWARE_BMP280
 //#define BARO_HWARE BARO_HWARE_BME280
+#define BARO_HWARE BARO_HWARE_BME680
 
 #include <Wire.h>
 
 #if BARO_HWARE == BARO_HWARE_BMP280
   #include "src/libs/Adafruit_BMP280/Adafruit_BMP280.h"
 #elif BARO_HWARE == BARO_HWARE_BME280
-  include "src/libs/Adafruit_BME280/Adafruit_BME280.h"
+  #include "src/libs/Adafruit_BME280/Adafruit_BME280.h"
+#elif BARO_HWARE == BARO_HWARE_BME680
+  #include "src/libs/Adafruit_BME680/Adafruit_BME680.h"
 #endif
 
 #include <EEPROM.h>
@@ -318,6 +322,8 @@ bool currently_active = true;
   Adafruit_BMP280 bhware;
 #elif BARO_HWARE == BARO_HWARE_BME280
   Adafruit_BME280 bhware;
+#elif BARO_HWARE == BARO_HWARE_BME680
+  Adafruit_BME680 bhware;
 #endif
 
 #define BARO_HISTORY_LENGTH 10
@@ -421,14 +427,20 @@ void bhware_setup()
   if(!bhware.begin())
   {
     #ifdef BARO_DEBUG_ON
-    debug_info("Failed !!! to initialize BME280");
+    debug_info("Failed !!! to initialize BARO HARDWARE");
     #endif
   }
   for(i = 0; i < BARO_HISTORY_LENGTH; i++)
   {
     pressure_history[i] = 0.0;
     temperature_history[i] = 0.0;
-  }   
+  }
+  #if BARO_HWARE == BARO_HWARE_BME680
+    bhware.setTemperatureOversampling(BME680_OS_8X);
+    bhware.setHumidityOversampling(BME680_OS_2X);
+    bhware.setPressureOversampling(BME680_OS_4X);
+    bhware.setIIRFilterSize(BME680_FILTER_SIZE_3);
+  #endif
 }
 
 

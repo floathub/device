@@ -31,7 +31,7 @@
 //#define WIFI_DEBUG_ON
 //#define FILE_DEBUG_ON
 //#define FILE_SERVE_ON	// Useful when debuggig to see SPIFF files from a browser
-#define CELL_DEBUG_ON
+//#define CELL_DEBUG_ON
 //#define AISR_DEBUG_ON
 
 //
@@ -49,7 +49,7 @@ String cellular_debug_string;
 //
 
 #define MAX_COOKIES 10
-#define CELLULAR_CODE_ON	
+// #define CELLULAR_CODE_ON	
 
 
 #include <ESP8266WiFi.h>
