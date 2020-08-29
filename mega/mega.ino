@@ -186,7 +186,8 @@
   Some AES variables
 */
 
-#define MAX_AES_CIPHER_LENGTH 800
+// #define MAX_AES_CIPHER_LENGTH 800
+#define MAX_AES_CIPHER_LENGTH 384
 AES aes;
 byte iv[16];
 byte volatile_iv[16];
@@ -231,8 +232,10 @@ int		send_message_failures = 0;	//  Number of times we can fail to send somethin
    Some global Strings, character arrays
 */
 
-#define MAX_LATEST_MESSAGE_SIZE 512
-#define MAX_NEW_MESSAGE_SIZE 256 
+#define MAX_LATEST_MESSAGE_SIZE 384
+#define MAX_NEW_MESSAGE_SIZE 320
+// #define MAX_LATEST_MESSAGE_SIZE 512
+// #define MAX_NEW_MESSAGE_SIZE 256
 String latest_message_to_send = "";
 String new_message = "";
 String a_string = "";
@@ -245,7 +248,7 @@ String mac_address;
 */
 
 byte 	byte_zero, byte_one, byte_two, byte_three;
-int  	int_one, handy;
+int  	handy;
 float	float_one;
 unsigned int i;
 
@@ -326,12 +329,10 @@ bool currently_active = true;
   Adafruit_BME680 bhware;
 #endif
 
-#define BARO_HISTORY_LENGTH 10
 #define TEMPERATURE_BIAS 5	//  degrees F that BMP, on average, over reports temperature by
 float temperature;
 float pressure;
-float pressure_history[BARO_HISTORY_LENGTH];
-float temperature_history[BARO_HISTORY_LENGTH];
+
 
 
 /*
@@ -429,11 +430,6 @@ void bhware_setup()
     #ifdef BARO_DEBUG_ON
     debug_info("Failed !!! to initialize BARO HARDWARE");
     #endif
-  }
-  for(i = 0; i < BARO_HISTORY_LENGTH; i++)
-  {
-    pressure_history[i] = 0.0;
-    temperature_history[i] = 0.0;
   }
   #if BARO_HWARE == BARO_HWARE_BME680
     bhware.setTemperatureOversampling(BME680_OS_8X);
@@ -747,11 +743,10 @@ void setup()
   //  unitialized device)
   //
   
-  int a = 0;
   for(i = 0; i < 6; i++)
   {
-    a = EEPROM.read(i);
-    if(a != 42)
+    handy = EEPROM.read(i);
+    if(handy != 42)
     {
       init_eeprom_memory();
       break;
@@ -891,84 +886,8 @@ void bhware_read()
   //	history, average thing is just there to get rid of outliers
   //
   
-  float average = 0.0;
-  handy = 0;  
-
-  for(i =0; i < BARO_HISTORY_LENGTH - 1 ; i++)
-  {
-    if(temperature_history[i] > 1)
-    {
-      average += temperature_history[i];
-      handy ++;
-    }
-    temperature_history[i] = temperature_history[i+1];
-  }
-
-  temperature_history[BARO_HISTORY_LENGTH - 1] = (1.8 * bhware.readTemperature()) + 32 - TEMPERATURE_BIAS ;
-
-  if(handy > 0)
-  {
-    average = average / ((float) handy);
-    float closest = abs(temperature_history[BARO_HISTORY_LENGTH - 1] - average);
-    temperature = temperature_history[BARO_HISTORY_LENGTH - 1];
-    #ifdef BARO_DEBUG_ON
-    debug_info(String(F("Temperature ")) + String(BARO_HISTORY_LENGTH) + String(F(": ")), temperature_history[BARO_HISTORY_LENGTH - 1]);
-    #endif
-    for(int_one = BARO_HISTORY_LENGTH - 2; int_one >= 0; int_one--)
-    {
-      #ifdef BARO_DEBUG_ON
-      debug_info(String(F("Temperature ")) + String(int_one) + String(F(": ")), temperature_history[int_one]);
-      #endif
-      if(abs(temperature_history[int_one] - average) < closest)
-      {
-        closest = abs(temperature_history[int_one] - average);
-        temperature = temperature_history[int_one];
-      }
-    }
-  }
-  else
-  {
-    temperature = temperature_history[BARO_HISTORY_LENGTH - 1];
-  }
-
-
-
-  for(i = 0; i < BARO_HISTORY_LENGTH - 1 ; i++)
-  {
-    if(pressure_history[i] > 1)
-    {
-      average += pressure_history[i];
-      handy ++;
-    }
-    pressure_history[i] = pressure_history[i+1];
-  }
-
-  pressure_history[BARO_HISTORY_LENGTH - 1] = bhware.readPressure() * 0.000295300;
-
-  if(handy > 0)
-  {
-    average = average / ((float) handy);
-    float closest = abs(pressure_history[BARO_HISTORY_LENGTH - 1] - average);
-    pressure = pressure_history[BARO_HISTORY_LENGTH - 1];
-    #ifdef BARO_DEBUG_ON
-    debug_info(String(F("Pressure ")) + String(BARO_HISTORY_LENGTH) + String(F(": ")), pressure_history[BARO_HISTORY_LENGTH - 1]);
-    #endif
-    for(int_one = BARO_HISTORY_LENGTH - 2; int_one >= 0; int_one--)
-    {
-      #ifdef BARO_DEBUG_ON
-      debug_info(String(F("Pressure ")) + String(int_one) + String(F(": ")), pressure_history[int_one]);
-      #endif
-      if(abs(pressure_history[int_one] - average) < closest)
-      {
-        closest = abs(pressure_history[int_one] - average);
-        pressure = pressure_history[int_one];
-      }
-    }
-  }
-  else
-  {
-    pressure = pressure_history[BARO_HISTORY_LENGTH - 1];
-  }
+  temperature = (1.8 * bhware.readTemperature()) + 32 - TEMPERATURE_BIAS ;
+  pressure = bhware.readPressure() * 0.000295300;  
 
   //
   //	Output Temperature and Pressure as NMEA sentences in case anyone is listening

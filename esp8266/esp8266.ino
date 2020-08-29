@@ -49,7 +49,7 @@ String cellular_debug_string;
 //
 
 #define MAX_COOKIES 10
-// #define CELLULAR_CODE_ON	
+#define CELLULAR_CODE_ON	
 
 
 #include <ESP8266WiFi.h>
