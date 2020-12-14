@@ -49,7 +49,7 @@ String cellular_debug_string;
 //
 
 #define MAX_COOKIES 10
-#define CELLULAR_CODE_ON	
+// #define CELLULAR_CODE_ON	
 
 
 #include <ESP8266WiFi.h>
@@ -4425,7 +4425,7 @@ void readConsole()
   // to be some cellular debugging output, show it
   //
 
-  #ifdef CELL_DEBUG_ONk
+  #ifdef CELL_DEBUG_ON
   if(cellular_debug_string.length() > 0)
   {
     debug_info(cellular_debug_string);

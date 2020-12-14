@@ -127,10 +127,12 @@
 #define BARO_HWARE_BMP280 1
 #define BARO_HWARE_BME280 2
 #define BARO_HWARE_BME680 3
+#define BARO_HWARE_BMP180 4
 
-//#define BARO_HWARE BARO_HWARE_BMP280
+//define BARO_HWARE BARO_HWARE_BMP280
 //#define BARO_HWARE BARO_HWARE_BME280
-#define BARO_HWARE BARO_HWARE_BME680
+//#define BARO_HWARE BARO_HWARE_BME680
+#define BARO_HWARE BARO_HWARE_BMP180
 
 #include <Wire.h>
 
@@ -140,6 +142,8 @@
   #include "src/libs/Adafruit_BME280/Adafruit_BME280.h"
 #elif BARO_HWARE == BARO_HWARE_BME680
   #include "src/libs/Adafruit_BME680/Adafruit_BME680.h"
+#elif BARO_HWARE == BARO_HWARE_BMP180
+  #include "src/libs/Adafruit_BMP/Adafruit_BMP085.h"
 #endif
 
 #include <EEPROM.h>
@@ -327,6 +331,8 @@ bool currently_active = true;
   Adafruit_BME280 bhware;
 #elif BARO_HWARE == BARO_HWARE_BME680
   Adafruit_BME680 bhware;
+#elif BARO_HWARE == BARO_HWARE_BMP180
+  Adafruit_BMP085 bhware;
 #endif
 
 #define TEMPERATURE_BIAS 5	//  degrees F that BMP, on average, over reports temperature by
