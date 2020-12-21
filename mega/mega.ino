@@ -1,9 +1,14 @@
 /*
 
  FloatHub Arduino Code
- (c) 2011-2019 Modiot Labs
+ (c) 2011-2021 Modiot Labs
  (begun June 6, 2011)
 
+
+  December 2020 
+
+  Major rework to do all the encryption at the ESP level so we have enough
+  resources on the mega to handle the new N2K processing. 
 
   March 2018
 
@@ -130,9 +135,9 @@
 #define BARO_HWARE_BMP180 4
 
 //define BARO_HWARE BARO_HWARE_BMP280
-//#define BARO_HWARE BARO_HWARE_BME280
+#define BARO_HWARE BARO_HWARE_BME280
 //#define BARO_HWARE BARO_HWARE_BME680
-#define BARO_HWARE BARO_HWARE_BMP180
+//#define BARO_HWARE BARO_HWARE_BMP180
 
 #include <Wire.h>
 
@@ -310,7 +315,7 @@ unsigned long nmea_rmc_timestamp = 0;
 */
 
 #define SOFT_SERIAL_RX_PIN 10
-#define SOFT_SERIAL_TX_PIN 11  // We don't actually currently use this for anything    
+#define SOFT_SERIAL_TX_PIN 12  // We don't actually currently use this for anything    
 SoftwareSerial soft_serial (SOFT_SERIAL_RX_PIN, SOFT_SERIAL_TX_PIN); 
 
 
