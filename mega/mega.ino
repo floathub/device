@@ -8,7 +8,8 @@
   December 2020 
 
   Major rework to do all the encryption at the ESP level so we have enough
-  resources on the mega to handle the new N2K processing. 
+  resources on the mega to handle the new N2K processing. All AES moved to 
+  the ESP8266 level. 
 
   March 2018
 
