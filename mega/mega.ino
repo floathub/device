@@ -130,15 +130,16 @@
  
 */
 
-#define BARO_HWARE_BMP280 1
-#define BARO_HWARE_BME280 2
-#define BARO_HWARE_BME680 3
-#define BARO_HWARE_BMP180 4
 
-//define BARO_HWARE BARO_HWARE_BMP280
-#define BARO_HWARE BARO_HWARE_BME280
-//#define BARO_HWARE BARO_HWARE_BME680
-//#define BARO_HWARE BARO_HWARE_BMP180
+/*
+  Anything which changes what the Floathub Data Receiver (fdr) needs to do
+  to parse data should bump something in the version defines.  This include
+  also covers any compile time flags for version/hardware variations.
+*/
+
+#include "version_defines.h"
+
+
 
 #include <Wire.h>
 
@@ -155,54 +156,12 @@
 #include <EEPROM.h>
 #include <stdio.h>
 #include "src/libs/Time/Time.h"
-#include "src/libs/AES/AES.h"
-#include "src/libs/Base64/Base64.h"
 #include <avr/wdt.h>
 #include <util/crc16.h>
 #include <SPI.h>
 #include <SoftwareSerial.h>
 
 #include "sometypes.h"
-
-/*
-  Compile time option/debug flags
-*/
-
-//#define CONSOLE_DEBUG_ON
-//#define GPS_DEBUG_ON
-//#define GPS_SOURCE_DEBUG_ON
-//#define PUMP_DEBUG_ON
-//#define EXECUTION_PATH_DEBUG_ON
-//#define NMEA_DEBUG_ON
-//#define DEBUG_MEMORY_ON
-//#define STRESS_MEMORY_ON
-//#define BYPASS_AES_ON
-//#define BARO_DEBUG_ON	
-//#define ACTIVE_DEBUG_ON
-//#define SERIAL_DEBUG_ON
-//#define SOFTSERIAL_DEBUG_ON
-
-
-/*
-  Anything which changes what the Floathub Data Receiver (fdr) needs to do
-  to parse data should bump one these settings (if it's an enryption change,
-  it's obviously the second one)
-*/
-
-#include "version_defines.h"
-
-
-/*
-  Some AES variables
-*/
-
-// #define MAX_AES_CIPHER_LENGTH 800
-#define MAX_AES_CIPHER_LENGTH 384
-AES aes;
-byte iv[16];
-byte volatile_iv[16];
-byte plain[MAX_AES_CIPHER_LENGTH];
-byte cipher[MAX_AES_CIPHER_LENGTH];
 
 
 /*
@@ -225,7 +184,8 @@ unsigned long	user_reset_pin_timestamp = 0;	//  Last time the user rest pin was 
 #define         USER_RESET_FACTORY_TIME 20000	//  Hold down reset pin for 20 seconds to make device factory reset
 int		send_message_failures = 0;	//  Number of times we can fail to send something to ESP8266 before we dual reboot
 #define		MAX_SEND_MESSAGE_FAILURES 5
-#define         ACTIVE_SPEED_THRESHOLD 1.0
+float           speed_threshold = 1.75;
+float           speed_vector[7];
 
 /*
   Status LED's
@@ -242,16 +202,14 @@ int		send_message_failures = 0;	//  Number of times we can fail to send somethin
    Some global Strings, character arrays
 */
 
-#define MAX_LATEST_MESSAGE_SIZE 384
-#define MAX_NEW_MESSAGE_SIZE 320
-// #define MAX_LATEST_MESSAGE_SIZE 512
-// #define MAX_NEW_MESSAGE_SIZE 256
+#define MAX_LATEST_MESSAGE_SIZE 256
 String latest_message_to_send = "";
-String new_message = "";
 String a_string = "";
 String b_string = "";
 char   temp_string[20];  
 String mac_address;
+byte plain[MAX_LATEST_MESSAGE_SIZE];
+
 
 /*
   Handy variables to use at various stages (better to be global, less memory)
@@ -452,6 +410,77 @@ void bhware_setup()
 }
 
 
+
+/*
+void sendUBX(uint8_t *MSG, uint8_t len) {
+  for(int i=0; i<len; i++) {
+    Serial3.write(MSG[i]);
+    Serial.print(MSG[i], HEX);
+  }
+  Serial3.println();
+}
+ 
+ 
+// Calculate expected UBX ACK packet and parse UBX response from GPS
+boolean getUBX_ACK(uint8_t *MSG) {
+  uint8_t b;
+  uint8_t ackByteID = 0;
+  uint8_t ackPacket[10];
+  unsigned long startTime = millis();
+  Serial.print(" * Reading ACK response: ");
+ 
+  // Construct the expected ACK packet    
+  ackPacket[0] = 0xB5;	// header
+  ackPacket[1] = 0x62;	// header
+  ackPacket[2] = 0x05;	// class
+  ackPacket[3] = 0x01;	// id
+  ackPacket[4] = 0x02;	// length
+  ackPacket[5] = 0x00;
+  ackPacket[6] = MSG[2];	// ACK class
+  ackPacket[7] = MSG[3];	// ACK id
+  ackPacket[8] = 0;		// CK_A
+  ackPacket[9] = 0;		// CK_B
+ 
+  // Calculate the checksums
+  for (uint8_t i=2; i<8; i++) {
+    ackPacket[8] = ackPacket[8] + ackPacket[i];
+    ackPacket[9] = ackPacket[9] + ackPacket[8];
+  }
+ 
+  while (1) {
+ 
+    // Test for success
+    if (ackByteID > 9) {
+      // All packets in order!
+      Serial.println(" (SUCCESS!)");
+      return true;
+    }
+ 
+    // Timeout if no valid response in 3 seconds
+    if (millis() - startTime > 3000) { 
+      Serial.println(" (FAILED!)");
+      return false;
+    }
+ 
+    // Make sure data is available to read
+    if (Serial3.available()) {
+      b = Serial3.read();
+ 
+      // Check that bytes arrive in sequence as per expected ACK packet
+      if (b == ackPacket[ackByteID]) { 
+        ackByteID++;
+        Serial.print(b, HEX);
+      } 
+      else {
+        ackByteID = 0;	// Reset and look again, invalid order
+      }
+ 
+    }
+  }
+}
+*/
+
+
 void gps_setup()
 {
   //
@@ -477,6 +506,86 @@ void gps_setup()
   Serial3.println("$PUBX,40,RMC,0,1,0,0,0,0*46");
   Serial3.println("$PUBX,40,GSV,0,0,0,0,0,0*59");
   Serial3.println("$PUBX,40,VTG,0,0,0,0,0,0*5E");
+  
+  //
+  //	Assuming a NEO-6M, try and set it to "at-sea" mode
+  //
+
+  /*
+  uint8_t tester_thingy[] = 
+  {
+    0x06, 0x24, 		// Message class and ID (class is configuration, id is navigation confiuration 
+    0x24, 0x00, 		// 0x24 = 36 bytes in length of rest of message
+    0xFF, 0xFF, 		// Mask (all on = apply all settings that follow)
+    0x06,			// Set Dynamic platform model to 6 ("at sea") 
+    0x03, 			// Set fix mode to Auto 2D/3D
+    0x00, 0x00, 0x00, 0x00,	// Fixed altitude for 2D Mode 
+    0x10, 0x27, 0x00, 0x00, 	// Fixed altitude variance for 2D Mode 
+    0x05,			// Min elevation for a satellite to be used 
+    0x00,			// Max time to perform an extrapolation if GPS signal lost 
+    0xFA, 0x00, 		// Position DOP Mask
+    0xFA, 0x00, 		// Time DOP Mask
+    0x64, 0x00, 		// Position Accuracy Mask
+    0x2C, 0x01, 		// Time Accuracy Mask
+    0x1A, 			// Static Hold Threshold ( 0.5 knot = 26 cm/s = 0x1A)
+    0x00,			// DGPS timeout 
+    0x00, 0x00, 0x00, 0x00, 	// Always zero
+    0x00, 0x00, 0x00, 0x00, 	// Always zero
+    0x00, 0x00, 0x00, 0x00, 	// Always zero
+  };
+  
+  uint8_t CK_A = 0;
+  uint8_t CK_B = 0;
+  for(i=0;i<40;i++)
+  {
+    CK_A = CK_A + tester_thingy[i] ;
+    CK_B = CK_B + CK_A ;
+  }
+  Serial.print("tester_thingy checksums is ");
+  Serial.print(CK_A, HEX);
+  Serial.println(CK_B, HEX);
+  */
+
+
+  
+  uint8_t configure_gps_command[] = {
+    0xB5, 0x62,			// Ublox "sync" characters
+    0x06, 0x24, 		// Message class and ID (class is configuration, id is navigation confiuration 
+    0x24, 0x00, 		// 0x24 = 36 bytes in length of rest of message
+    0xFF, 0xFF, 		// Mask (all on = apply all settings that follow)
+    0x06,			// Set Dynamic platform model to 6 ("at sea") 
+    0x03, 			// Set fix mode to Auto 2D/3D
+    0x00, 0x00, 0x00, 0x00,	// Fixed altitude for 2D Mode 
+    0x10, 0x27, 0x00, 0x00, 	// Fixed altitude variance for 2D Mode 
+    0x05,			// Min elevation for a satellite to be used 
+    0x00,			// Max time to perform an extrapolation if GPS signal lost 
+    0xFA, 0x00, 		// Position DOP Mask
+    0xFA, 0x00, 		// Time DOP Mask
+    0x64, 0x00, 		// Position Accuracy Mask
+    0x2C, 0x01, 		// Time Accuracy Mask
+    0x1A, 			// Static Hold Threshold
+    0x00,			// DGPS timeout 
+    0x00, 0x00, 0x00, 0x00, 	// Always zero
+    0x00, 0x00, 0x00, 0x00, 	// Always zero
+    0x00, 0x00, 0x00, 0x00, 	// Always zero
+    0x30, 0x48 };
+  
+  for(i=0; i < sizeof(configure_gps_command)/sizeof(uint8_t); i++)
+  {
+    Serial3.write(configure_gps_command[i]);
+  }
+  Serial3.println();
+
+  /*
+  byte gps_set_sucess = 0 ;
+  while(!gps_set_sucess)
+  {
+    sendUBX(configure_gps_command, sizeof(configure_gps_command)/sizeof(uint8_t));
+    gps_set_sucess=getUBX_ACK(configure_gps_command);
+  }
+  */
+  
+  
 }
 
 
@@ -666,13 +775,16 @@ void setup()
   gps_read_buffer.reserve(MAX_GPS_BUFFER);
   nmea_read_buffer.reserve(MAX_NMEA_BUFFER);
   hsnmea_read_buffer.reserve(MAX_NMEA_BUFFER);
-  new_message.reserve(MAX_NEW_MESSAGE_SIZE);
   latest_message_to_send.reserve(MAX_LATEST_MESSAGE_SIZE);
   a_string.reserve(MAX_LATEST_MESSAGE_SIZE);
   b_string.reserve(MAX_GPS_BUFFER);
   mac_address.reserve(32);
   mac_address = "";
 
+  for(i=0; i < 7; i++)
+  {
+    speed_vector[i] = 0.0;
+  }
   //
   //  Do we put out FHA/FHB/FHC messages on the console?
   //
@@ -706,6 +818,13 @@ void setup()
   soft_serial.listen();
   
   //
+  //  Setup main serial port for local data monitoring
+  //
+  
+  Serial.begin(115200);
+  delay(200);
+  
+  //
   //  Misc setup
   //
 
@@ -713,13 +832,6 @@ void setup()
   gps_setup();
   latest_message_to_send = "";
   send_message_failures = 0;
-  
-  //
-  //  Setup main serial port for local data monitoring
-  //
-  
-  Serial.begin(115200);
-  delay(200);
   
   //
   //	Setup NMEA in port
@@ -815,17 +927,17 @@ void help_info(String some_info)
 
 void display_current_variables()
 {
-  new_message = F("code=");
-  new_message += FLOATHUB_PROTOCOL_VERSION;
-  new_message += F(".");
-  new_message += FLOATHUB_ENCRYPT_VERSION;
+  latest_message_to_send = F("code=");
+  latest_message_to_send += FLOATHUB_PROTOCOL_VERSION;
+  latest_message_to_send += F(".");
+  latest_message_to_send += FLOATHUB_ENCRYPT_VERSION;
   
-  new_message += F(",m=");
-  new_message += FLOATHUB_MODEL_DESCRIPTION;
-  new_message += F(",b=");
-  new_message += boot_counter;
-  help_info(new_message);
-  new_message = "";
+  latest_message_to_send += F(",m=");
+  latest_message_to_send += FLOATHUB_MODEL_DESCRIPTION;
+  latest_message_to_send += F(",b=");
+  latest_message_to_send += boot_counter;
+  help_info(latest_message_to_send);
+  latest_message_to_send = "";
 
   String line = F("i=");
   line += float_hub_id;
@@ -1011,6 +1123,23 @@ void bhware_read()
 }
 
 
+int my_compare_function (const void * arg1, const void * arg2)
+{
+  float * a = (float *) arg1;  // cast to pointers to integers
+  float * b = (float *) arg2;
+
+  if (*a < *b)
+  {
+    return -1;
+  }
+
+  else if (*a > *b)
+  {
+    return 1;
+  }
+  return 0;
+} 
+
 void parse_gps_buffer_as_rmc()
 {
 
@@ -1140,16 +1269,59 @@ void parse_gps_buffer_as_rmc()
     gps_bearing_true  = gps_read_buffer.substring(tmg_start + 1, date_start);
 
     //
-    //   Use speed over gound to figure out if active. Used to have some
+    //   Use speed over gound to figure out if active.  Used to have some
     // really complicated math in here for running average of latitude and
-    // longitude, but this is far simpler and seems more reliable
+    // longitude, then had point observation, which was ok.  Now doing
+    // median of 5 most recent values (minimal outlier filter)
     //
 
     memset(temp_string, 0, 20 * sizeof(char));
     gps_sog.substring(0,gps_sog.length()).toCharArray(temp_string, 19);
     float_one = atof(temp_string);
+    
+    
+    //
+    // Add current observation to the speed vector and make a copy
+    //
+    float sorted_vector[7];
+    for(i=0; i<6; i++)
+    {
+      speed_vector[i] = speed_vector[i+1];
+      sorted_vector[i] = speed_vector[i];
+    }
+    speed_vector[6] = float_one;
+    sorted_vector[6] = float_one;
+
+    //
+    // Make a copy and sort them
+    //
+    
+    qsort (sorted_vector, 7, sizeof (float), my_compare_function);
+    
+    /*
+    Serial.println("--------------");
+    Serial.print("Raw: ");
+    for(i =0; i < 5; i++)
+    {
+      Serial.print(speed_vector[i]);
+      Serial.print(", ");
+    }
+    Serial.println("");
+    Serial.print("Sorted: ");
+    for(i =0; i < 5; i++)
+    {
+      Serial.print(sorted_vector[i]);
+      Serial.print(", ");
+    }
+    Serial.println("");
+    Serial.println("--------------");
+    */
+    
+    //
+    //  Use *MEDIAN* speed value to determine if we are "active"
+    //
   
-    if(float_one > ACTIVE_SPEED_THRESHOLD)  //  Faster than 1/3 of a knot?
+    if(sorted_vector[3] > speed_threshold)  
     {
       #ifdef ACTIVE_DEBUG_ON
       debug_info(F("active: ON "), float_one);
@@ -1514,29 +1686,27 @@ void individual_pump_read(int pump_number, pump_state &state, int analog_input)
        #ifdef PUMP_DEBUG_ON
        debug_info(F("Pump turned on!"));
        #endif
-       new_message = F("$FHB:");
-       new_message += float_hub_id;
-       new_message += F(":");
-       new_message += FLOATHUB_PROTOCOL_VERSION;
-       new_message += F("$");
+       latest_message_to_send = F("$FHB:");
+       latest_message_to_send += float_hub_id;
+       latest_message_to_send += F(":");
+       latest_message_to_send += FLOATHUB_PROTOCOL_VERSION;
+       latest_message_to_send += F("$");
        if(gps_valid || timeStatus() != timeNotSet)
        {
-         add_timestamp_to_string(new_message);
+         add_timestamp_to_string(latest_message_to_send);
        }
-       new_message += F(",P");
-       new_message += pump_number;
-       new_message += F(":1");
+       latest_message_to_send += F(",P");
+       latest_message_to_send += pump_number;
+       latest_message_to_send += F(":1");
 
        if(float_hub_id == "factoryX" and mac_address.length() == 12)
        {
-         new_message += F(",I:");
-         new_message += mac_address;
+         latest_message_to_send += F(",I:");
+         latest_message_to_send += mac_address;
        }       
 
-       latest_message_to_send = new_message;
-       encode_latest_message_to_send();
-       send_encoded_message_to_esp8266();
-       echo_info(new_message);
+       send_message_to_esp8266();
+       echo_info(latest_message_to_send);
        state = on;       
      }
   }
@@ -1551,31 +1721,29 @@ void individual_pump_read(int pump_number, pump_state &state, int analog_input)
        #ifdef PUMP_DEBUG_ON
        debug_info(F("Pump turned off!"));
        #endif
-       new_message = F("$FHB:");
-       new_message += float_hub_id;
-       new_message += F(":");
-       new_message += FLOATHUB_PROTOCOL_VERSION;
-       new_message += F("$");
+       latest_message_to_send = F("$FHB:");
+       latest_message_to_send += float_hub_id;
+       latest_message_to_send += F(":");
+       latest_message_to_send += FLOATHUB_PROTOCOL_VERSION;
+       latest_message_to_send += F("$");
 
        if(gps_valid|| timeStatus() != timeNotSet)
        {
-         add_timestamp_to_string(new_message);
+         add_timestamp_to_string(latest_message_to_send);
        }
-       new_message += F(",P");
-       new_message += pump_number;
-       new_message += F(":0");
+       latest_message_to_send += F(",P");
+       latest_message_to_send += pump_number;
+       latest_message_to_send += F(":0");
 
        if(float_hub_id == "factoryX" and mac_address.length() == 12)
        {
-         new_message += F(",I:");
-         new_message += mac_address;
+         latest_message_to_send += F(",I:");
+         latest_message_to_send += mac_address;
        }       
 
-       latest_message_to_send = new_message;
-       encode_latest_message_to_send();
-       send_encoded_message_to_esp8266();
+       send_message_to_esp8266();
 
-       echo_info(new_message);
+       echo_info(latest_message_to_send);
        state = off;
      }
   }
@@ -1602,8 +1770,8 @@ void possibly_append_data(float value, float test, String tag)
 {
   if(value > test)
   {
-    new_message += tag;
-    append_float_to_string(new_message, value);
+    latest_message_to_send += tag;
+    append_float_to_string(latest_message_to_send, value);
   }
 }
 
@@ -1614,7 +1782,7 @@ void report_state(bool console_only)
   {
     if(console_mode)
     {
-      new_message = F("$FHC:");
+      latest_message_to_send = F("$FHC:");
     }
     else
     {
@@ -1623,55 +1791,55 @@ void report_state(bool console_only)
   }
   else
   {
-    new_message = F("$FHA:");
+    latest_message_to_send = F("$FHA:");
   }
 
-  new_message += float_hub_id;
-  new_message += F(":");
-  new_message += FLOATHUB_PROTOCOL_VERSION;
-  new_message += F("$");
+  latest_message_to_send += float_hub_id;
+  latest_message_to_send += F(":");
+  latest_message_to_send += FLOATHUB_PROTOCOL_VERSION;
+  latest_message_to_send += F("$");
   if(gps_valid == true || timeStatus() != timeNotSet )
   {
-     add_timestamp_to_string(new_message);
+     add_timestamp_to_string(latest_message_to_send);
   }
 
   if(mac_address.length() == 12 && ( float_hub_id == "factoryX" || random(0, 100) < 3))
   {
-    new_message += F(",I:");
-    new_message += mac_address;
+    latest_message_to_send += F(",I:");
+    latest_message_to_send += mac_address;
   }
   
-  new_message += F(",T:");
-  append_float_to_string(new_message, temperature);
+  latest_message_to_send += F(",T:");
+  append_float_to_string(latest_message_to_send, temperature);
 
-  new_message += F(",P:");
-  append_float_to_string(new_message, pressure);
+  latest_message_to_send += F(",P:");
+  append_float_to_string(latest_message_to_send, pressure);
 
   if(gps_valid == true && gps_altitude.length() > 0)
   {
-    new_message += F(",L:");
-    new_message += gps_latitude;
+    latest_message_to_send += F(",L:");
+    latest_message_to_send += gps_latitude;
     
-    new_message += F(",O:");
-    new_message += gps_longitude;
+    latest_message_to_send += F(",O:");
+    latest_message_to_send += gps_longitude;
 
-    new_message += F(",A:");
-    new_message += gps_altitude;
+    latest_message_to_send += F(",A:");
+    latest_message_to_send += gps_altitude;
 
-    new_message += F(",H:");
-    new_message += gps_hdp;
+    latest_message_to_send += F(",H:");
+    latest_message_to_send += gps_hdp;
     
-    new_message += F(",S:");
-    new_message += gps_sog;
+    latest_message_to_send += F(",S:");
+    latest_message_to_send += gps_sog;
 
-    new_message += F(",B:");
-    new_message += gps_bearing_true;
+    latest_message_to_send += F(",B:");
+    latest_message_to_send += gps_bearing_true;
   }
 
   if(gps_siv.length() > 0)
   {
-    new_message += String(F(",N:"));
-    new_message += gps_siv;
+    latest_message_to_send += String(F(",N:"));
+    latest_message_to_send += gps_siv;
   }
 
   possibly_append_data(battery_one, 1.0, F(",V1:"));
@@ -1698,11 +1866,9 @@ void report_state(bool console_only)
 
   if(!console_only)
   {
-    latest_message_to_send = new_message;
-    encode_latest_message_to_send();
-    send_encoded_message_to_esp8266();
+    send_message_to_esp8266();
   }
-  echo_info(new_message);
+  echo_info(latest_message_to_send);
 }
 
 
@@ -1739,6 +1905,15 @@ void parse_esp8266()
       {
         float_hub_id = a_string;
         write_eeprom_memory();
+      }
+    }
+    else if(esp8266_read_buffer.length() >= 25 && esp8266_read_buffer.substring(20).startsWith(F("t=")))
+    {
+      a_string = esp8266_read_buffer.substring(22);
+      float_one = a_string.toFloat();
+      if(float_one >= 0.0 && float_one <= 99.99 && speed_threshold != float_one)
+      {
+        speed_threshold = float_one;
       }
     }
     else if(esp8266_read_buffer.length() >= 54 && esp8266_read_buffer.substring(20).startsWith(F("k=")))
@@ -2274,7 +2449,7 @@ void parse_hsnmea_sentence()
   //
   // We don't parse actual AIS !AIVDM type sentences, _but_ if we are
   // getting regular NMEA data over the HS port (probably from a
-  // multiplexer), so will try and parse that by quickly swapping out the
+  // multiplexer), we will try and parse that by quickly swapping out the
   // regular NMEA buffer
   //
 
@@ -2365,7 +2540,7 @@ void update_hsnmea()
 }
 
 
-bool try_and_send_encoded_message_to_esp8266()
+bool try_and_send_message_to_esp8266()
 {
   //
   //  Somewhat perversly, we take our time here as we want to be sure
@@ -2432,7 +2607,6 @@ bool try_and_send_encoded_message_to_esp8266()
   checksum.toUpperCase();
   if(checksum.length() < 2)
   {
-    
     checksum =  String(F("@0")) + checksum + String(F("\r\n"));
   }
   else
@@ -2477,9 +2651,9 @@ void dualReboot()
 }
 
 
-void  send_encoded_message_to_esp8266()
+void  send_message_to_esp8266()
 {
-  if(!try_and_send_encoded_message_to_esp8266())
+  if(!try_and_send_message_to_esp8266())
   {
     send_message_failures++;
     if(send_message_failures > MAX_SEND_MESSAGE_FAILURES)
@@ -2491,106 +2665,6 @@ void  send_encoded_message_to_esp8266()
   {
     send_message_failures = 0;
   }
-}
-
-
-void encode_latest_message_to_send()
-{
-  #ifdef BYPASS_AES_ON
-    return;
-  #endif
-
-  #ifdef STRESS_MEMORY_ON
-  for(i=0; i < 10; i++)
-  {
-    latest_message_to_send += F(" MEMORY STRESS TEST");
-  }
-  #endif
-
-  //
-  //  Take the latest message that is set up to go over GPRS and AES encode it, then Base-64 convert it
-  //
-    
-  unsigned int cipher_length, base64_length;
- 
-  aes.set_key (float_hub_aes_key, 128) ;
-  
-  for(i = 0; i < 16; i++)
-  {
-    iv[i] = random(0, 256);
-    volatile_iv[i] = iv[i];
-  }
-
-  //
-  //  Copy current message to plain
-  //
-    
-  for(i = 0; i < latest_message_to_send.length(); i++)
-  {
-    plain[i] = latest_message_to_send.charAt(i);
-  }
-  cipher_length = i;
-  if(cipher_length % 16 == 0)
-  {
-    for(i = 0; i < 16; i++)
-    {
-      plain[cipher_length + i] = 16;
-    }
-    cipher_length += 16;
-  }
-  else
-  {
-    for(i = 0; i < 16 - (cipher_length % 16); i++)
-    {
-      plain[cipher_length + i] = 16 - (cipher_length % 16);
-    }
-    cipher_length += i;
-  }
-
-  //
-  //  Encrypt current message with AES CBC
-  // 
-
-  aes.cbc_encrypt (plain, cipher,  cipher_length / 4, volatile_iv) ;
-  
-  //
-  //  Now we reuse the plain text array to store cipher with the 
-  //  initialization vector at the beginning
-  //
-
-  
-  for(i = 0; i < 16; i++)
-  {
-    plain[i] = iv[i];
-  }
-  for(i = 0; i < cipher_length; i++)
-  {
-    plain[16 + i] = cipher[i];
-  }
-  
-
-  //
-  //  Now convert that long line of bytes in plain to base 64, recycling the cipher array to hold it
-  //
-  
-  base64_length = base64_encode( (char *) cipher, (char *) plain, cipher_length + 16);
-  cipher[base64_length] = '\0';
-  latest_message_to_send = F("$FHS:");
-  latest_message_to_send += float_hub_id;
-  latest_message_to_send += F(":");
-  latest_message_to_send += FLOATHUB_ENCRYPT_VERSION;
-  latest_message_to_send += F("$,");
-  for(i = 0; i < base64_length; i++)
-  {
-    latest_message_to_send += (char) cipher[i];
-  }
-
-  //
-  //  Clean up?
-  // 
-
-  aes.clean();  //  Not sure if that does anything useful or not.   
-
 }
 
 

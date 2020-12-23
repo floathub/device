@@ -20,38 +20,7 @@
 
 */
 
-//
-//	Debugging options
-//
-
-//#define HTTP_DEBUG_ON
-//#define MDNS_DEBUG_ON
-//#define STAT_DEBUG_ON
-//#define INPT_DEBUG_ON
-//#define WIFI_DEBUG_ON
-//#define FILE_DEBUG_ON
-//#define FILE_SERVE_ON	// Useful when debuggig to see SPIFF files from a browser
-//#define CELL_DEBUG_ON
-//#define AISR_DEBUG_ON
-
-//
-//  Have to have a separate string for cellular debugging as cellular stuff
-// is called on an interrupt so we can'd directly print stuff out
-// (especially over virtual serial) during the interrupt call
-//
-
-#ifdef CELL_DEBUG_ON
-String cellular_debug_string;
-#endif
-
-//
-//  Global defines
-//
-
-#define MAX_COOKIES 10
-// #define CELLULAR_CODE_ON	
-
-
+#include "version_defines.h"
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
 #include <ESP8266mDNS.h>
@@ -61,7 +30,6 @@ String cellular_debug_string;
 #include "src/libs/AES/AES.h"
 #include "src/libs/Base64/Base64.h"
 #include "static.h"
-#include "version_defines.h"
 
 #ifdef CELLULAR_CODE_ON
 #include <SPISlave.h>
@@ -134,15 +102,16 @@ byte          float_hub_aes_key[16];
 //	Other Settings
 //
 
-bool	nmea_mux_on;				// default: yes
-bool    nmea_mux_private;			// default: no
-bool    relay_ais_data;				// default: yes
-bool    relay_ais_cellular;		        // default: no
-bool    force_wifi_connect;			// default: no
+bool	      nmea_mux_on;			// default: yes
+bool          nmea_mux_private;			// default: no
+bool          relay_ais_data;			// default: yes
+bool          relay_ais_cellular;		// default: no
+bool          force_wifi_connect;		// default: no
 unsigned int  nmea_mux_port;			// default: 2319
-String	web_interface_username;			// default: floathub
-String	web_interface_password;			// default: floathub
+String	      web_interface_username;		// default: floathub
+String	      web_interface_password;		// default: floathub
 unsigned int  udp_broadcast_port;		// default: 2000
+float	      speed_threshold;			// default: 1.75 (knots)
 
 
 //
@@ -591,6 +560,9 @@ void init_eeprom_memory()
   EEPROM.write(328, 7);		// UDP broadcast default of 2000
   EEPROM.write(329, 208); 	//
 
+  EEPROM.write(330, 0);	 	// Default speed threshold 1.75 knots
+  EEPROM.write(331, 175); 	//
+
   //
   // Web interface username and password
   //
@@ -714,6 +686,10 @@ void write_eeprom_memory()
   EEPROM.write(327, force_wifi_connect);
   EEPROM.write(328, highByte(udp_broadcast_port));
   EEPROM.write(329, lowByte(udp_broadcast_port));
+  unsigned int temp_int = round(speed_threshold * 100.0);  
+  EEPROM.write(330, highByte(temp_int));
+  EEPROM.write(331, lowByte(temp_int));
+  
  
   //
   // Web interface username and password
@@ -846,7 +822,10 @@ void read_eeprom_memory()
   force_wifi_connect = EEPROM.read(327);
   udp_broadcast_port  = EEPROM.read(329);
   udp_broadcast_port += EEPROM.read(328) * 256;
-  
+  unsigned int temp_int = EEPROM.read(331);
+  temp_int += EEPROM.read(330) * 256;
+  speed_threshold = temp_int / 100.0 ; 
+
   //
   //  Phone home?
   // 
@@ -1023,6 +1002,18 @@ void checkPort(unsigned int &the_port)
   if(the_port < 1)
   {
     the_port = 1; 
+  }
+}
+
+void checkFloat(float &the_float)
+{
+  if(the_float > 99.9)
+  {
+    the_float = 99.9;
+  }
+  if(the_float < 0.1)
+  {
+    the_float = 0.1; 
   }
 }
 
@@ -1700,6 +1691,12 @@ void handleOther()
       checkPort(udp_broadcast_port);
       something_changed = true;
     }
+    if(speed_threshold != web_server.arg("sthresh").toFloat())
+    {
+      speed_threshold = web_server.arg("sthresh").toFloat();
+      checkFloat(speed_threshold);
+      something_changed = true;
+    }
     if(web_server.arg("localname").length() < 1)
     {
       error_message += ".local name cannot be blank";
@@ -1779,6 +1776,9 @@ void handleOther()
   }
   page += "><br>";
   #endif
+
+  page += "<label for='sthresh'>Speed Threshold: </label>";
+  page += "<input type='number' min='0' step='0.01' name='sthresh' length='5' maxlength='5' value='" + String(speed_threshold) + "' ><br>";
 
   page += "<button type='submit' name='savebutton' value='True'>Save</button>";
   page += "</form></div><br>";
@@ -2200,6 +2200,7 @@ void displayCurrentVariables()
   help_info(String(F("N=")) + nmea_mux_on); 
   help_info(String(F("n=")) + nmea_mux_port); 
   help_info(String(F("b=")) + udp_broadcast_port); 
+  help_info(String(F("t=")) + speed_threshold); 
   help_info(String(F("e=")) + nmea_mux_private); 
   help_info(String(F("r=")) + relay_ais_data); 
   #ifdef CELLULAR_CODE_ON
@@ -2769,6 +2770,79 @@ bool openFdr()
 
 
 
+unsigned int encode_message(String string_to_send)
+{
+
+  int i = 0;
+  unsigned int cipher_length, base64_length;
+  aes.set_key (float_hub_aes_key, 128) ;
+  for(i = 0; i < 16; i++)
+  {
+    iv[i] = random(0, 256);
+    volatile_iv[i] = iv[i];
+  }
+
+  for(i = 0; i < string_to_send.length(); i++)
+  {
+    plain_text[i] = string_to_send.charAt(i);
+  }
+  cipher_length = i;
+
+  //
+  //  AES encrypted messages should end on a 16 byte (128 bit) boundary
+  //
+
+  if(cipher_length % 16 == 0)
+  {
+    for(i = 0; i < 16; i++)
+    {
+      plain_text[cipher_length + i] = 16;
+    }
+    cipher_length += 16;
+  }
+  else
+  {
+    for(i = 0; i < 16 - (cipher_length % 16); i++)
+    {
+      plain_text[cipher_length + i] = 16 - (cipher_length % 16);
+    }
+    cipher_length += i;
+  }
+
+  //
+  //  Now right length, we can encrypt
+  //
+
+  aes.cbc_encrypt (plain_text, cipher_text,  cipher_length / 4, volatile_iv) ;
+
+  //
+  //  Now we reuse the plain text array to store cipher with the
+  //  initialization vector at the beginning
+  //
+
+  
+  for(i = 0; i < 16; i++)
+  {
+    plain_text[i] = iv[i];
+  }
+  for(i = 0; i < cipher_length; i++)
+  {
+    plain_text[16 + i] = cipher_text[i];
+  }
+  
+
+  //
+  //  Now convert that long line of bytes in plain to base 64, recycling the cipher array to hold it
+  //
+  
+  base64_length = base64_encode( (char *) cipher_text, (char *) plain_text, cipher_length + 16);
+  cipher_text[base64_length] = '\0';
+  
+  return base64_length;
+}
+
+
+
 void echoNMEA(String a_message)
 {
   int how_many; 
@@ -2877,73 +2951,10 @@ void echoNMEA(String a_message)
     #endif
 
     //
-    // We have to encode and markup as FHS 
+    // Endcode the message (AES and then Base 64)
     //
 
-    int i = 0;
-    unsigned int cipher_length, base64_length;
-    aes.set_key (float_hub_aes_key, 128) ;
-    for(i = 0; i < 16; i++)
-    {
-      iv[i] = random(0, 256);
-      volatile_iv[i] = iv[i];
-    }
-
-    for(i = 0; i < string_to_send.length(); i++)
-    {
-      plain_text[i] = string_to_send.charAt(i);
-    }
-    cipher_length = i;
-
-    //
-    //  AES encrypted messages should end on a 16 byte (128 bit) boundary
-    //
-
-    if(cipher_length % 16 == 0)
-    {
-      for(i = 0; i < 16; i++)
-      {
-        plain_text[cipher_length + i] = 16;
-      }
-      cipher_length += 16;
-    }
-    else
-    {
-      for(i = 0; i < 16 - (cipher_length % 16); i++)
-      {
-        plain_text[cipher_length + i] = 16 - (cipher_length % 16);
-      }
-      cipher_length += i;
-    }
-
-    //
-    //  Now right length, we can encrypt
-    //
-
-    aes.cbc_encrypt (plain_text, cipher_text,  cipher_length / 4, volatile_iv) ;
-
-    //
-    //  Now we reuse the plain text array to store cipher with the
-    //  initialization vector at the beginning
-    //
-
-  
-    for(i = 0; i < 16; i++)
-    {
-      plain_text[i] = iv[i];
-    }
-    for(i = 0; i < cipher_length; i++)
-    {
-      plain_text[16 + i] = cipher_text[i];
-    }
-  
-
-    //
-    //  Now convert that long line of bytes in plain to base 64, recycling the cipher array to hold it
-    //
-  
-    base64_length = base64_encode( (char *) cipher_text, (char *) plain_text, cipher_length + 16);
-    cipher_text[base64_length] = '\0';
+    unsigned int base64_length = encode_message(string_to_send);
 
     //
     // Assemble into FHS
@@ -2954,7 +2965,7 @@ void echoNMEA(String a_message)
     fhs_message_to_send += F(":");
     fhs_message_to_send += FLOATHUB_ENCRYPT_VERSION;
     fhs_message_to_send += F("$,");
-    for(i = 0; i < base64_length; i++)
+    for(int i = 0; i < base64_length; i++)
     {
       fhs_message_to_send += (char) cipher_text[i];
     }
@@ -3164,13 +3175,36 @@ void queueMessage(String a_message)
     #endif
     return;
   }
+  
+  //
+  //  We now have to encrypt here (as of late 2020, the mega no longer does
+  //  any encryption
+  //
+  
+  
+  unsigned int base64_length = encode_message(a_message);
+
+  //
+  // Assemble into FHS
+  //
+
+  String fhs_message_to_send = F("$FHS:");
+  fhs_message_to_send += float_hub_id;
+  fhs_message_to_send += F(":");
+  fhs_message_to_send += FLOATHUB_ENCRYPT_VERSION;
+  fhs_message_to_send += F("$,");
+  for(int i = 0; i < base64_length; i++)
+  {
+    fhs_message_to_send += (char) cipher_text[i];
+  }
+  fhs_message_to_send += "\r\n";
 
   if(latest_message_to_send.length() == 0)
   {
     #ifdef INPT_DEBUG_ON
     debug_info(F("Queued Message, No File"));
     #endif
-    latest_message_to_send = a_message;
+    latest_message_to_send = fhs_message_to_send;
     latest_message_from_file = false;
   }
   else 
@@ -3178,7 +3212,7 @@ void queueMessage(String a_message)
     #ifdef INPT_DEBUG_ON
     debug_info(F("Pushing Message to File"));
     #endif
-    pushMessageQueue(a_message);
+    pushMessageQueue(fhs_message_to_send);
   }
 }
 
@@ -4119,20 +4153,24 @@ void heartbeatHouseKeeping()
   {
     internal_info(String(F("m=")) + mac_address);
   }
+  else if(heartbeat_cycle == 4)
+  {
+    internal_info(String(F("t=")) + speed_threshold);
+  }
 
   #ifdef CELLULAR_CODE_ON
-  else if(heartbeat_cycle == 4)
+  else if(heartbeat_cycle == 5)
   {
     internal_info(String(F("d=")) + cellular_link_up); 
   }
   heartbeat_cycle++;
-  if(heartbeat_cycle >=5)
+  if(heartbeat_cycle >=6)
   {
     heartbeat_cycle = 0;
   }
   #else
   heartbeat_cycle++;
-  if(heartbeat_cycle >=4)
+  if(heartbeat_cycle >=5)
   {
     heartbeat_cycle = 0;
   }
