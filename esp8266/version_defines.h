@@ -29,7 +29,7 @@
 //
 
 #define MAX_COOKIES 10
-// #define CELLULAR_CODE_ON	
+#define CELLULAR_CODE_ON	
 
 
 #ifdef CELLULAR_CODE_ON

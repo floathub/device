@@ -112,6 +112,7 @@ String	      web_interface_username;		// default: floathub
 String	      web_interface_password;		// default: floathub
 unsigned int  udp_broadcast_port;		// default: 2000
 float	      speed_threshold;			// default: 1.75 (knots)
+byte	      stationary_interval;		// default: 10 (minutes)
 
 
 //
@@ -245,7 +246,7 @@ String	virtual_serial_read_buffer;
 unsigned watchdog_timestamp;
 #define  WATCHDOG_TIME_LIMIT 21600000UL		        // If we do not manage to get any data through to FDR after 6 hours, reboot the whole shebang 
 #define  WATCHDOG_USE_CELLULAR_TIME_LIMIT 30000UL       // After boot up, give it 30 seconds
-#define  WATCHDOG_WIFI_NOT_WORKING_TIME_LIMIT 900000UL  // If we have WiFi, but nothing is getting through, use cellular if possible after 15 mins.
+#define  WATCHDOG_WIFI_NOT_WORKING_TIME_LIMIT 300000UL  // If we have WiFi, but nothing is getting through, use cellular if possible after WiFi still time + 5 minutes
 
 //
 //  Flag to signal that we need to jump out of any SIPSlave callbacks
@@ -563,6 +564,8 @@ void init_eeprom_memory()
   EEPROM.write(330, 0);	 	// Default speed threshold 1.75 knots
   EEPROM.write(331, 175); 	//
 
+  EEPROM.write(332, 10); 	// Default stationary reporting interval of 10 minutes
+
   //
   // Web interface username and password
   //
@@ -689,6 +692,7 @@ void write_eeprom_memory()
   unsigned int temp_int = round(speed_threshold * 100.0);  
   EEPROM.write(330, highByte(temp_int));
   EEPROM.write(331, lowByte(temp_int));
+  EEPROM.write(332, stationary_interval);
   
  
   //
@@ -822,9 +826,16 @@ void read_eeprom_memory()
   force_wifi_connect = EEPROM.read(327);
   udp_broadcast_port  = EEPROM.read(329);
   udp_broadcast_port += EEPROM.read(328) * 256;
+
+
+  //
+  //  Reporting parameters
+  //
+
   unsigned int temp_int = EEPROM.read(331);
   temp_int += EEPROM.read(330) * 256;
   speed_threshold = temp_int / 100.0 ; 
+  stationary_interval = EEPROM.read(332);
 
   //
   //  Phone home?
@@ -1002,6 +1013,18 @@ void checkPort(unsigned int &the_port)
   if(the_port < 1)
   {
     the_port = 1; 
+  }
+}
+
+void checkInterval(byte &the_interval)
+{
+  if(the_interval > 240)
+  {
+    the_interval = 240;
+  }
+  if(the_interval < 1)
+  {
+    the_interval = 1; 
   }
 }
 
@@ -1697,6 +1720,12 @@ void handleOther()
       checkFloat(speed_threshold);
       something_changed = true;
     }
+    if(stationary_interval != web_server.arg("stinter").toInt())
+    {
+      stationary_interval = web_server.arg("stinter").toInt();
+      checkInterval(stationary_interval);
+      something_changed = true;
+    }
     if(web_server.arg("localname").length() < 1)
     {
       error_message += ".local name cannot be blank";
@@ -1779,6 +1808,9 @@ void handleOther()
 
   page += "<label for='sthresh'>Speed Threshold: </label>";
   page += "<input type='number' min='0' step='0.01' name='sthresh' length='5' maxlength='5' value='" + String(speed_threshold) + "' ><br>";
+
+  page += "<label for='sthresh'>Stationary Interval: </label>";
+  page += "<input type='number' min='1' step='1' max='240' name='stinter' length='5' maxlength='5' value='" + String(stationary_interval) + "' ><br>";
 
   page += "<button type='submit' name='savebutton' value='True'>Save</button>";
   page += "</form></div><br>";
@@ -2201,6 +2233,7 @@ void displayCurrentVariables()
   help_info(String(F("n=")) + nmea_mux_port); 
   help_info(String(F("b=")) + udp_broadcast_port); 
   help_info(String(F("t=")) + speed_threshold); 
+  help_info(String(F("T=")) + stationary_interval); 
   help_info(String(F("e=")) + nmea_mux_private); 
   help_info(String(F("r=")) + relay_ais_data); 
   #ifdef CELLULAR_CODE_ON
@@ -2872,6 +2905,7 @@ void echoNMEA(String a_message)
     IPAddress IP_broadcast = ~uint32_t(WiFi.subnetMask()) | uint32_t(WiFi.gatewayIP());
     udp.beginPacket(IP_broadcast, udp_broadcast_port);
     udp.write(a_message.c_str());
+    udp.write("\r\n");
     udp.endPacket();
 
     //
@@ -2881,6 +2915,7 @@ void echoNMEA(String a_message)
     IP_broadcast = IPAddress(192, 168, 4, 255);
     udp.beginPacket(IP_broadcast, udp_broadcast_port);
     udp.write(a_message.c_str());
+    udp.write("\r\n");
     udp.endPacket();
   }
 
@@ -3197,7 +3232,7 @@ void queueMessage(String a_message)
   {
     fhs_message_to_send += (char) cipher_text[i];
   }
-  fhs_message_to_send += "\r\n";
+  // fhs_message_to_send += "\r\n";
 
   if(latest_message_to_send.length() == 0)
   {
@@ -4157,20 +4192,24 @@ void heartbeatHouseKeeping()
   {
     internal_info(String(F("t=")) + speed_threshold);
   }
+  else if(heartbeat_cycle == 5)
+  {
+    internal_info(String(F("T=")) + stationary_interval);
+  }
 
   #ifdef CELLULAR_CODE_ON
-  else if(heartbeat_cycle == 5)
+  else if(heartbeat_cycle == 6)
   {
     internal_info(String(F("d=")) + cellular_link_up); 
   }
   heartbeat_cycle++;
-  if(heartbeat_cycle >=6)
+  if(heartbeat_cycle >=7)
   {
     heartbeat_cycle = 0;
   }
   #else
   heartbeat_cycle++;
-  if(heartbeat_cycle >=5)
+  if(heartbeat_cycle >=6)
   {
     heartbeat_cycle = 0;
   }
@@ -4369,7 +4408,7 @@ void fdrHouseKeeping()
 
    #ifdef CELLULAR_CODE_ON
    if ( 
-        millis() - watchdog_timestamp > WATCHDOG_WIFI_NOT_WORKING_TIME_LIMIT &&
+        millis() - watchdog_timestamp > ((unsigned long) stationary_interval * 60 * 1000) + WATCHDOG_WIFI_NOT_WORKING_TIME_LIMIT &&
 	cellular_link_up == true &&
 	cellular_link_ready == true &&
         phone_home_on == true &&

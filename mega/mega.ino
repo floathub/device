@@ -185,6 +185,7 @@ unsigned long	user_reset_pin_timestamp = 0;	//  Last time the user rest pin was 
 int		send_message_failures = 0;	//  Number of times we can fail to send something to ESP8266 before we dual reboot
 #define		MAX_SEND_MESSAGE_FAILURES 5
 float           speed_threshold = 1.75;
+byte		stationary_interval = 10;
 float           speed_vector[7];
 
 /*
@@ -231,7 +232,7 @@ unsigned long voltage_interval = 5000;            	//  Check batteries/chargers 
 unsigned long pump_interval = 1200;               	//  Check pump state every 1.2 seconds
 unsigned long active_reporting_interval = 30000;  	//  When in use, report data every 30 seconds
 //unsigned long idle_reporting_interval = 10000;   	//  Stress testing during development
-unsigned long idle_reporting_interval = 600000;   	//  When idle, report data every 10 minutes
+//unsigned long idle_reporting_interval = 600000;   	//  When idle, report data every 10 minutes
 //unsigned long idle_reporting_interval = 30000;   	//  Demoboat only every 30 seconds
 unsigned long console_reporting_interval = 5000;  	//  Report to USB console every 5 seconds  
 unsigned long console_interval = 250;             	//  Check console for input every 250 milliseconds
@@ -1916,6 +1917,15 @@ void parse_esp8266()
         speed_threshold = float_one;
       }
     }
+    else if(esp8266_read_buffer.length() >= 23 && esp8266_read_buffer.substring(20).startsWith(F("T=")))
+    {
+      a_string = esp8266_read_buffer.substring(22);
+      byte_one = a_string.toInt();
+      if(byte_one >= 1 && byte_one <= 240 && stationary_interval != byte_one)
+      {
+        stationary_interval = byte_one;
+      }
+    }
     else if(esp8266_read_buffer.length() >= 54 && esp8266_read_buffer.substring(20).startsWith(F("k=")))
     {
       char a_char;
@@ -2786,7 +2796,7 @@ void loop()
   }
   else
   {
-    if(current_timestamp - previous_idle_timestamp >  idle_reporting_interval)
+   if(current_timestamp - previous_idle_timestamp >  ((unsigned long) stationary_interval * 60 * 1000))
     {
       report_state(false);
       zero_nmea_values();
