@@ -11,8 +11,9 @@ Note that the esp8266 directory contains separate code that is to be flashed
 to the onboard esp8266.
 
 And the electron directory is used to flash the Electron board from
-Particle.io (for FloatHub devices with cellular connectivity).  This code no
-longer uses the Hologram Dash which was briefly used as a cellular
+Particle.io (for FloatHub devices with cellular connectivity).  The boron
+directory is, similarly, for flashing boron boards from particle.  This code
+no longer uses the Hologram Dash which was briefly used as a cellular
 connectivity option.
 
 
