@@ -17,7 +17,7 @@ code no longer uses the Hologram Dash which was briefly used as a cellular
 connectivity option.
 
 
-The current and recommended build environment for this code is Arduino 1.8.9
+The current and recommended build environment for this code is Arduino 1.8.13
 with the following serial buffer modifications:
 
   HardwareSerial.h
