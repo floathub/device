@@ -293,7 +293,6 @@ void help_info(String some_info)
     virtual_serial_client.print(F("$    "));
     virtual_serial_client.println(some_info);
   }
-
 }
 
 void internal_info(String some_info)
@@ -2218,7 +2217,6 @@ void displayCurrentVariables()
   }
   help_info(new_message);
 
-
   help_info(String(F("w=")) + public_wifi_ssid); 
   help_info(String(F("W=")) + public_wifi_password); 
   help_info(String(F("x=")) + private_wifi_ssid); 
@@ -2614,7 +2612,8 @@ void setup(void)
   //  Set up communicatinons to the Mega
   //
 
-  Serial.begin ( 115200 );
+  //Serial.begin ( 115200 );
+  Serial.begin ( 256000 );
   serial_ready_pin = 5;
   pinMode(serial_ready_pin, OUTPUT);
   signalBusy();

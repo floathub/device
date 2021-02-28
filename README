@@ -73,3 +73,53 @@ Electron/Particle.io Libraries
 
 Built and tested with 1.0.1, which is the recommended version.
 
+
+Teensy 4.1 Libraries
+--------------------
+
+Starting in early 2021, the FloatHub hardware is migrating to Teensy
+architecture. The modifications to a stock Teensy Arduino install are to
+change the Serial Buffer sizes in:
+
+	hardware/teensy/avr/cores/teensy4/HardwareSerialX.cpp
+
+With the following changes:
+
+
+	Serial1.cpp (to the GPS)
+	Change:
+		#define SERIAL7_TX_BUFFER_SIZE     40 
+		#define SERIAL7_RX_BUFFER_SIZE     64
+	To:
+		#define SERIAL7_TX_BUFFER_SIZE     256
+		#define SERIAL7_RX_BUFFER_SIZE     256
+
+
+	Serial6.cpp (for HSNMEA via MAX3232)
+	Change:
+		#define SERIAL7_TX_BUFFER_SIZE     40 
+		#define SERIAL7_RX_BUFFER_SIZE     64
+	To:
+		#define SERIAL7_TX_BUFFER_SIZE     1024 
+		#define SERIAL7_RX_BUFFER_SIZE     1024
+
+
+	Serial7.cpp (to the ESP8266)
+	Change:
+		#define SERIAL7_TX_BUFFER_SIZE     40 
+		#define SERIAL7_RX_BUFFER_SIZE     64
+	To:
+		#define SERIAL7_TX_BUFFER_SIZE     2048 
+		#define SERIAL7_RX_BUFFER_SIZE     2048
+
+
+	Serial8.cpp (for NMEA via MAX3232)
+	Change:
+		#define SERIAL7_TX_BUFFER_SIZE     40 
+		#define SERIAL7_RX_BUFFER_SIZE     64
+	To:
+		#define SERIAL7_TX_BUFFER_SIZE     256
+		#define SERIAL7_RX_BUFFER_SIZE     256
+
+
+        
