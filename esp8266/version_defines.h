@@ -20,7 +20,7 @@
 //#define WIFI_DEBUG_ON
 //#define FILE_DEBUG_ON
 //#define FILE_SERVE_ON	// Useful when debuggig to see SPIFF files from a browser
-#define CELL_DEBUG_ON
+//#define CELL_DEBUG_ON
 //#define AISR_DEBUG_ON
 
 

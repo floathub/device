@@ -3351,6 +3351,50 @@ void processNewIPAddress(String preamble, IPAddress &the_address, IPAddress new_
 }
 
 
+void processNewKeyValue(String preamble, String &the_input, uint start_location = 0, uint end_location = 16)
+{
+  the_input.toLowerCase();
+
+  for(uint i=0; i < (end_location - start_location) * 2; i++)
+  {
+    if(!((the_input[i+2] >= '0' && the_input[i+2] <= '9') || (the_input[i+2] >= 'a' && the_input[i+2] <= 'f' )))          
+    {
+      help_info("Bad input");
+      return;
+    }
+  }        
+  String display_string = preamble;
+  for(uint i = 0; i < end_location - start_location; i++)
+  {
+    int new_value = 0;
+    if (the_input[2 + (i * 2)] <='9')
+    {
+      new_value = (the_input[2 + (i * 2)] - '0' ) * 16;
+    }
+    else
+    {
+      new_value = (the_input[2 + (i * 2)] - 'a' + 10) * 16;
+    }    
+    if (the_input[3 + (i * 2)] <='9')
+    {
+      new_value += the_input[3 + (i * 2)] - '0';
+    }
+    else
+    {
+      new_value += the_input[3 + (i * 2)] - 'a' + 10;
+    }
+    float_hub_aes_key[i + start_location] = new_value;
+    if(float_hub_aes_key[i + start_location] < 16)
+    {
+      display_string += "0";
+    }
+    display_string += String(float_hub_aes_key[i + start_location], HEX);
+  }
+  write_eeprom_memory();
+  help_info(display_string);
+}
+
+
 void parseInput(String &the_input)
 {
   int i;
@@ -3697,53 +3741,8 @@ void parseInput(String &the_input)
   #endif
 
   else if(the_input.startsWith("k=") && the_input.length() == 34)
-  {        
-    bool bad_chars = false;
-    the_input.toLowerCase();
-
-    for(i=0; i < 32; i++)
-    {
-      if(!((the_input[i+2] >= '0' && the_input[i+2] <= '9') || (the_input[i+2] >= 'a' && the_input[i+2] <= 'f' )))          
-      {
-        help_info("Bad input");
-        bad_chars = true;
-        break;
-      }
-    }        
-    if(!bad_chars)
-    {
-      String display_string = "k=";
-      for(i = 0; i < 16; i++)
-      {
-        int new_value = 0;
-        if (the_input[2 + (i * 2)] <='9')
-        {
-          new_value = (the_input[2 + (i * 2)] - '0' ) * 16;
-        }
-        else
-        {
-          new_value = (the_input[2 + (i * 2)] - 'a' + 10) * 16;
-        }
-    
-        if (the_input[3 + (i * 2)] <='9')
-        {
-          new_value += the_input[3 + (i * 2)] - '0';
-        }
-        else
-        {
-          new_value += the_input[3 + (i * 2)] - 'a' + 10;
-        }
-
-        float_hub_aes_key[i] = new_value;
-        if(float_hub_aes_key[i] < 16)
-        {
-          display_string += "0";
-        }
-        display_string += String(float_hub_aes_key[i], HEX);
-      }
-      write_eeprom_memory();
-      help_info(display_string);
-    }    
+  {
+    processNewKeyValue("k=", the_input);     
   }
   #ifdef INPT_DEBUG_ON
   else if(the_input.startsWith("k="))
@@ -3752,6 +3751,27 @@ void parseInput(String &the_input)
   }
   #endif
 
+  else if(the_input.startsWith("m=") && the_input.length() == 18)
+  {
+    processNewKeyValue("m=", the_input, 0, 8);     
+  }
+  #ifdef INPT_DEBUG_ON
+  else if(the_input.startsWith("m="))
+  {
+    debug_info(F("Bad length"));
+  }
+  #endif
+
+  else if(the_input.startsWith("n=") && the_input.length() == 18)
+  {
+    processNewKeyValue("n=", the_input, 8, 16);     
+  }
+  #ifdef INPT_DEBUG_ON
+  else if(the_input.startsWith("n="))
+  {
+    debug_info(F("Bad length"));
+  }
+  #endif
 
   else if(the_input.startsWith("N=") && the_input.length() >= 3)
   {        
@@ -4576,19 +4596,20 @@ void readConsole()
     debug_info(cellular_debug_string);
     cellular_debug_string = "";
   }
+  #endif
+
   
   //
-  // And if there happens to be a force congif command from the cellular unit, process that now.
+  // And if there happens to be a force config command from the cellular unit, process that now.
   //
   
+  #ifdef CELLULAR_CODE_ON
   if(cellular_force_config_message.length() > 0)
   {
     parseInput(cellular_force_config_message);
     cellular_force_config_message = "";
   }
-  
-  #endif
-
+  #endif  
   
 }
 
