@@ -17,7 +17,7 @@
 
 SYSTEM_THREAD(ENABLED);
 
-// #define DEBUG_ON
+//#define DEBUG_ON
 #define MAX_LATEST_MESSAGE_SIZE      512
 #define HOUSEKEEPING_INTERVAL        1000      // Check our network status and do other core tasks once every second
 #define MESSAGE_COMPLETION_LIMIT     60000     // If we can't assemble a whole message within 1 minute, assume it is garbled and toss it
@@ -35,6 +35,7 @@ static const system_tick_t DEFAULT_TIMEOUT = 10000;
 //  Global vars
 //
 
+String force_config_message;
 String latest_cellular_message_to_send;
 bool latest_message_complete;
 unsigned long housekeeping_timestamp = 0;
@@ -261,6 +262,35 @@ void send_SPI_message(const char * message)
 void poll_esp8266()
 {
   String message_to_send;
+  
+  //
+  //  If we have a (rare) force config message, we need to send that instead
+  //
+  
+
+  if(force_config_message.length() > 0)
+  {
+    message_to_send  = "FC";   // No link
+    message_to_send += force_config_message; 
+
+    if(message_to_send.length() > 32)
+    {
+      message_to_send = message_to_send.substring(0,33);
+    }
+
+    #ifdef DEBUG_ON
+    Serial.print("Polling ESP8266 with force config message of \"");
+    Serial.print(message_to_send);
+    Serial.println("\"");
+    #endif
+  
+    send_SPI_message((const char *) message_to_send.c_str());
+
+    force_config_message = "";
+    return;
+  }
+
+  
   if(current_cellular_status == true)
   {
     if(latest_cellular_message_to_send.length() == 0)
@@ -465,9 +495,35 @@ void read_eeprom_memory()
 }
 
 
+//
+// We can use the partical console to push configuration settings into this
+// device.  The boron just passes them along to the ESP8266.
+//
+
+int forceConfig(String config_string)
+{
+  if(config_string.length() > 30)
+  {
+    //Too long
+    return -1;
+  }
+  if(config_string.charAt(1) != '=')
+  {
+    //Does not look like a config command
+    return -2;
+  }
+  force_config_message = config_string;
+  return 1;
+}
 
 void setup()
 {
+  //
+  // Register our forceConfig function
+  //
+
+  Particle.function("forceConfig", forceConfig);
+
   Serial.begin(115200);
   delay(1000);
   SPI.begin(SPI_MODE_MASTER);
@@ -481,6 +537,10 @@ void setup()
   latest_cellular_message_to_send.reserve(MAX_LATEST_MESSAGE_SIZE);
   latest_cellular_message_to_send = "";
   latest_message_complete = true;
+
+  force_config_message.reserve(30);
+  force_config_message = "";
+
 
   //
   // Tell power management unit to stop trying to charge the LIPO battery, because there ain't one.
@@ -535,7 +595,7 @@ void setup()
   current_cellular_status = false;
   network_type = "none";
   sim_card_number = "unknown";
-
+  
 }
 
 void loop()

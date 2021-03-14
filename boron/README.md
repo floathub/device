@@ -1,32 +1,33 @@
 
-
 Compile:
 
   particle compile boron boron.ino
 
 Can constrain to a target:
 
-  particle compile boron --target 1.5.0 boron
+  particle compile boron --target 1.5.2 boron.ino
+  particle compile boron --target 2.0.1 boron.ino
 
 
-With a fresh Boron out of the box, you want to:
+Hold down both and then release reset until blinking
+yellow. Then do:
 
-  1. Hold down Mode button until blinking blue LED
-  2. Run: particle identify
+    particle flash --usb  2.0.1/boron/release/boron-bootloader@2.0.1.bin
 
-If the firmware is _not_ 1.5.0:
+    particle flash --usb boron_fc_good_firmware_2.0.1.bin
 
-  1. Press and hold both the RESET/RST and MODE/SETUP buttons simultaneously.
-  2. Release only the RESET/RST button while continuing to hold the MODE/SETUP button.
-  3. Release the MODE/SETUP button once the device begins to blink yellow.
-  4. Run: particle update
 
-Once you are on 1.5.0, you can flash the actual FloatHub firmware:
 
-  1. Hold down Mode/Setup button until blinking blue LED
-  2. Run: particle flash --serial boron_firmware.bin
+The file:
 
-To see debugging output:
+   boron_good_firmware_1.5.2.bin
 
-  particle serial monitor
+has known good code that we used on many devices through 2019 and 2020 and
+into early 2021 together with the particle firmware 1.5.2 for the boron.
+
+
+In March 2021 we added the forceConfig (FC) capability to the code and
+bumped it up to work with 2.0.1 particle firmware. That file is:
+
+    boron_fc_good_firmware_2.0.1.bin
 

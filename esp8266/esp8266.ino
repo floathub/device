@@ -167,6 +167,7 @@ String sim_card_number;
 String latest_cellular_message_to_send = "";
 String cellular_over_spi_message = "";
 String cellular_sub_message = "";
+String cellular_force_config_message = "";
 #endif
 
 //
@@ -1806,7 +1807,7 @@ void handleOther()
   #endif
 
   page += "<label for='sthresh'>Speed Threshold: </label>";
-  page += "<input type='number' min='0' step='0.01' name='sthresh' length='5' maxlength='5' value='" + String(speed_threshold) + "' ><br>";
+  page += "<input type='number' min='0' step='0.01' name='sthresh' length='5' max='240' maxlength='5' value='" + String(speed_threshold) + "' ><br>";
 
   page += "<label for='sthresh'>Stationary Interval: </label>";
   page += "<input type='number' min='1' step='1' max='240' name='stinter' length='5' maxlength='5' value='" + String(stationary_interval) + "' ><br>";
@@ -2449,20 +2450,24 @@ void ICACHE_RAM_ATTR cellular_callback(uint8_t * data, size_t len)
   {
     return;
   }
-
+  
   //
-  // We have received a message, describing the status of the cellular
-  // modem
+  // We have received a message, usually describing the status of the
+  // cellular modem
   //	
 
   cellular_over_spi_message = String((char *)data);
-
+  
   #ifdef CELL_DEBUG_ON
   cellular_debug_string = String(F("Cell in: ")) + cellular_over_spi_message;
   #endif
 
   //
-  // The message can be anything like:
+  // If we are trying to push forceConfig values down to this device from
+  // the Particle interface, we can get an FC message here that wants us to
+  // set something
+  //
+  // Otherwise, the message can be anything like:
   //
   //	"LU 123456 T-Mobile" = Link Up, provider is tmobile
   //	"LR 123456 AT&T"     = Link good, waiting for more to add to current message
@@ -2474,7 +2479,13 @@ void ICACHE_RAM_ATTR cellular_callback(uint8_t * data, size_t len)
   // good as long as first character of message is an L
   // 
 
-  if(cellular_over_spi_message.length() > 1 && cellular_over_spi_message.charAt(0) == 'L')
+  if(cellular_over_spi_message.length() > 2 && cellular_over_spi_message.charAt(0) == 'F' && cellular_over_spi_message.charAt(1) == 'C')
+  {
+    cellular_force_config_message = cellular_over_spi_message.substring(2,32);
+    SPISlave.setData("");
+    return;
+  }
+  else if(cellular_over_spi_message.length() > 1 && cellular_over_spi_message.charAt(0) == 'L')
   {
     cellular_link_up = true;
     cellular_link_timestamp = millis();
@@ -2550,6 +2561,7 @@ void setup_spi_slave_to_cellular()
   cellular_link_up = false;
   cellular_link_timestamp = 0;
   cellular_provider = F("Unknown");
+  cellular_force_config_message = "";
 }
 
 #endif
@@ -2613,7 +2625,8 @@ void setup(void)
   //
 
   //Serial.begin ( 115200 );
-  Serial.begin ( 256000 );
+  //Serial.begin ( 256000 );
+  Serial.begin ( ESP8266_BAUD_RATE );
   serial_ready_pin = 5;
   pinMode(serial_ready_pin, OUTPUT);
   signalBusy();
@@ -3314,6 +3327,14 @@ void processNewPortValue(String preamble, unsigned int &the_port, int new_value)
 }
 
 
+void processNewFloatValue(String preamble, float &the_float, float new_value)
+{
+  the_float = new_value;
+  write_eeprom_memory();
+  help_info(preamble + the_float);
+}
+
+
 void processNewFlagValue(String preamble, bool &the_flag, int new_value)
 {
   the_flag = new_value;
@@ -3445,6 +3466,54 @@ void parseInput(String &the_input)
     debug_info(F("Short input"));
   }
   #endif
+
+
+
+  else if(the_input.startsWith("t=") && the_input.length() >= 3)
+  {
+    float new_value = the_input.substring(2).toFloat();
+    if(new_value >= 0.0 && new_value <= 240.0)
+    { 	
+      processNewFloatValue("t=", speed_threshold, new_value);
+    }
+    #ifdef INPT_DEBUG_ON
+    else
+    {
+      debug_info(F("Bad number"));
+    }
+    #endif
+  }
+  #ifdef INPT_DEBUG_ON
+  else if(the_input.startsWith("t="))
+  {
+    debug_info(F("Short input"));
+  }
+  #endif
+
+  else if(the_input.startsWith("T=") && the_input.length() >= 3)
+  {
+    int new_value = the_input.substring(2).toInt ();
+    if(new_value >= 1 && new_value <= 240)
+    { 	
+      stationary_interval = new_value;
+      write_eeprom_memory();
+      help_info("T=" + stationary_interval);
+    }
+    #ifdef INPT_DEBUG_ON
+    else
+    {
+      debug_info(F("Bad number"));
+    }
+    #endif
+  }
+  #ifdef INPT_DEBUG_ON
+  else if(the_input.startsWith("T="))
+  {
+    debug_info(F("Short input"));
+  }
+  #endif
+
+
 
   else if(the_input.startsWith("w=") && the_input.length() >= 3)
   {        
@@ -4507,6 +4576,17 @@ void readConsole()
     debug_info(cellular_debug_string);
     cellular_debug_string = "";
   }
+  
+  //
+  // And if there happens to be a force congif command from the cellular unit, process that now.
+  //
+  
+  if(cellular_force_config_message.length() > 0)
+  {
+    parseInput(cellular_force_config_message);
+    cellular_force_config_message = "";
+  }
+  
   #endif
 
   

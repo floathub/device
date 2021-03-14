@@ -2277,7 +2277,8 @@ void factoryReset()
   digitalWrite(COM_LED_1, LOW);
   digitalWrite(COM_LED_2, LOW);
 
-  Serial7.println("FactoryResetNow");
+  //Serial7.println("FactoryResetNow");
+  resetESP();
   init_eeprom_memory();
   resetFunc();
 }
@@ -2398,25 +2399,25 @@ void setup()
   // Battery pins
   //
 
-  pinMode(A15, INPUT);  
-  pinMode(A16, INPUT);  
-  pinMode(A17, INPUT);  
+  pinMode(A15, INPUT_PULLDOWN);  
+  pinMode(A16, INPUT_PULLDOWN);  
+  pinMode(A17, INPUT_PULLDOWN);  
 
   //
   // Charger pins
   //
 
-  pinMode(A0, INPUT);  
-  pinMode(A1, INPUT);  
-  pinMode(A2, INPUT);  
+  pinMode(A0, INPUT_PULLDOWN);  
+  pinMode(A1, INPUT_PULLDOWN);  
+  pinMode(A2, INPUT_PULLDOWN);  
 
   //
   // Pump pins
   //
 
-  pinMode(A3, INPUT);  
-  pinMode(A6, INPUT);  
-  pinMode(A7, INPUT);  
+  pinMode(A3, INPUT_PULLDOWN);  
+  pinMode(A6, INPUT_PULLDOWN);  
+  pinMode(A7, INPUT_PULLDOWN);  
 
   console_read_buffer.reserve(MAX_CONSOLE_BUFFER);
   esp8266_read_buffer.reserve(MAX_ESP8266_BUFFER);
@@ -2477,7 +2478,7 @@ void setup()
   //  Seed the random number generator
   //
   
-  randomSeed(analogRead(0));
+  randomSeed(analogRead(A14));
   
   //
   //  Setup LED pins, initial is red on both
