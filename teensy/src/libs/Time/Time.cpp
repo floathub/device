@@ -35,7 +35,7 @@
 
 #include "Time.h"
 
-static tmElements_t tm;          // a cache of time elements
+static tmElements_tt tm;          // a cache of time elements
 static time_t cacheTime;   // the time the cache was updated
 static uint32_t syncInterval = 300;  // time sync will be attempted after this many seconds
 
@@ -148,7 +148,7 @@ int year(time_t t) { // the year for the given time
 
 static  const uint8_t monthDays[]={31,28,31,30,31,30,31,31,30,31,30,31}; // API starts months from 1, this array starts from 0
  
-void breakTime(time_t timeInput, tmElements_t &tm){
+void breakTime(time_t timeInput, tmElements_tt &tm){
 // break the given time_t into time components
 // this is a more compact version of the C library localtime function
 // note that year is offset from 1970 !!!
@@ -201,7 +201,7 @@ void breakTime(time_t timeInput, tmElements_t &tm){
   tm.Day = time + 1;     // day of month
 }
 
-time_t makeTime(tmElements_t &tm){   
+time_t makeTime(tmElements_tt &tm){   
 // assemble time elements into time_t 
 // note year argument is offset from 1970 (see macros in time.h to convert to other formats)
 // previous version used full four digit year (or digits since 2000),i.e. 2009 was 2009 or 9

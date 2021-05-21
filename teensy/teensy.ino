@@ -1,4 +1,4 @@
-  /*
+/*
 
   FloatHub Arduino Code
   (c) 2011-2021 Modiot Labs
@@ -121,6 +121,31 @@
   #include "src/libs/Adafruit_BMP/Adafruit_BMP085.h"
 #endif
 
+/*
+  Possibly n2k stuff
+*/
+
+#include "n2k.h"
+#ifdef N2K_CODE_ON
+// #define USE_MCP_CAN_CLOCK_SET 8
+// #define N2k_SPI_CS_PIN 11
+// #define N2k_CAN_INT_PIN 21 // Interrupt pin definition for Ardino Mega or other "CAN bus shield" boards.
+#include <NMEA2000_CAN.h>  // This will automatically choose right CAN library and create suitable NMEA2000 object
+//#include "N2kDataToNMEA0183.h"
+//#include <N2kMsg.h>
+//#include <NMEA2000.h>
+//#include <N2kMessages.h>
+
+
+// #include "BoardSerialNumber.h"
+
+//#ifdef ARDUINO
+//#define NMEA0183_Out_Stream_Speed 115200
+//#define NMEA0183_Out_Stream Serial
+
+const unsigned long TransmitMessages[] PROGMEM={0};
+const unsigned long ReceiveMessages[] PROGMEM={/*126992L,*/127250UL,127258UL,128259UL,128267UL,129025UL,129026L,129029L,0};
+#endif
 
 /*
   Libraries and whatnot
@@ -224,6 +249,16 @@ unsigned long nmea_update_interval = 100;         	//  Update NMEA serial-in lin
 unsigned long hsnmea_update_interval = 10;		//  Update HS NMEA (SoftwareSerial based) 100 times every second
 unsigned long hardware_watchdog_interval = 120; 	//  Do a hardware reset if we don't pat the dog every 2 minutes
 unsigned long nmea_sample_interval = 30000;		//  Nuke nmea data older than 30 seconds
+#ifdef N2K_CODE_ON
+//unsigned long n2k_interval = 1;			        //  Read N2K data 500 times a second
+unsigned long n2k_output_interval = 300;	        //  Output n2k data (as 0183) once every 1/3 of a second
+unsigned long n2k_interval = 10;			//  Read N2K data 100 times a second
+//unsigned long n2k_interval = 2;			//  Read N2K data 10 times a second
+//unsigned long n2k_interval = 1000;			//  Read N2K data 10 times a second
+//unsigned long n2k_interval = 5000;			//  Read N2K data 10 times a second
+#endif 
+  
+  
   
 unsigned long sensor_previous_timestamp = 0;
 unsigned long gps_previous_timestamp = 0;
@@ -248,6 +283,10 @@ unsigned long nmea_heading_magnetic_timestamp = 0;
 unsigned long nmea_heading_true_timestamp = 0;
 unsigned long nmea_gga_timestamp = 0;
 unsigned long nmea_rmc_timestamp = 0;
+#ifdef N2K_CODE_ON
+unsigned long n2k_previous_timestamp = 0; 
+unsigned long n2k_output_previous_timestamp = 0; 
+#endif 
 
 
 
@@ -595,8 +634,8 @@ void add_checksum_and_send_nmea_string(String nmea_string)
 
   if(esp8266IsReady())
   {
-    Serial1.print(F("E="));
-    Serial1.println(nmea_string);
+    Serial7.print(F("E="));
+    Serial7.println(nmea_string);
   }
   #ifdef SERIAL_DEBUG_ON
   else
@@ -765,6 +804,7 @@ int my_compare_function (const void * arg1, const void * arg2)
 
 void parse_gps_buffer_as_rmc()
 {
+
   int time_start = 6;
   int time_break = gps_read_buffer.indexOf('.', time_start + 1);
   int status_start = gps_read_buffer.indexOf(',', time_start + 1);
@@ -813,9 +853,33 @@ void parse_gps_buffer_as_rmc()
 
       return;
   }
+     
+  if (status_start  == time_start + 1 ||
+      lat_start == status_start + 1 ||
+      nors_start == lat_start + 1 ||
+      lon_start == nors_start + 1 ||
+      wore_start == lon_start + 1 ||
+      //sog_start == wore_start + 1 ||
+      //tmg_start == sog_start + 1 ||
+      //date_start == tmg_start + 1 ||
+      var_start == date_start + 1)
+  
+
+  {
+      #ifdef GPS_DEBUG_ON
+      debug_info(F("Empty RMC string"));
+      debug_info(gps_read_buffer);
+      #endif
+
+      #ifdef ACTIVE_DEBUG_ON
+      debug_info(F("active: OFF BRMD"));
+      #endif
+      currently_active = false;
+
+      return;
+  }
       
      
-  
   String is_valid = gps_read_buffer.substring(status_start + 1, lat_start);
   
   /*
@@ -886,8 +950,23 @@ void parse_gps_buffer_as_rmc()
 
   if(gps_valid)
   {
-    gps_sog  = gps_read_buffer.substring(sog_start + 1, tmg_start);
-    gps_bearing_true  = gps_read_buffer.substring(tmg_start + 1, date_start);
+    if(tmg_start > sog_start + 1)
+    {
+      gps_sog  = gps_read_buffer.substring(sog_start + 1, tmg_start);
+    }
+    else
+    {
+      gps_sog = "";
+    }
+
+    if(date_start > tmg_start + 1)
+    {
+      gps_bearing_true  = gps_read_buffer.substring(tmg_start + 1, date_start);
+    }
+    else
+    {
+      gps_bearing_true = "";
+    }
 
     //
     //   Use speed over gound to figure out if active.  Used to have some
@@ -947,6 +1026,7 @@ void parse_gps_buffer_as_rmc()
  
 }
 
+
 void parse_gps_buffer_as_gga()
 {
 
@@ -980,8 +1060,26 @@ void parse_gps_buffer_as_gga()
       #endif
       return;
   }
+  
+  if (lat_start  == time_start + 1 ||
+      nors_start == lat_start + 1 ||
+      lon_start  == nors_start + 1 ||
+      wore_start == lon_start + 1 ||
+      qual_start == wore_start + 1 ||
+      siv_start  == qual_start + 1 ||
+      hdp_start  == siv_start + 1 ||
+      alt_start  == hdp_start + 1 ||
+      altu_start == alt_start + 1)
+  {
+      gps_valid = false;
+      #ifdef GPS_DEBUG_ON
+      debug_info(F("Empty GGA string"));
+      debug_info(gps_read_buffer);
+      #endif
+      return;
+  }
       
-    
+
   gps_latitude  = gps_read_buffer.substring(lat_start + 1, lat_start + 3);
   gps_latitude += F(" ");
   gps_latitude += gps_read_buffer.substring(lat_start + 3, nors_start);
@@ -990,7 +1088,7 @@ void parse_gps_buffer_as_gga()
     gps_latitude += F("0");
   }
   gps_latitude += gps_read_buffer.substring(nors_start + 1, lon_start);
-    
+
   gps_longitude  = gps_read_buffer.substring(lon_start + 1, lon_start + 4);
   gps_longitude += F(" ");
   gps_longitude += gps_read_buffer.substring(lon_start + 4, wore_start);
@@ -999,11 +1097,11 @@ void parse_gps_buffer_as_gga()
     gps_longitude += F("0");
   }
   gps_longitude += gps_read_buffer.substring(wore_start + 1, qual_start);
-  
+
   gps_siv  = gps_read_buffer.substring(siv_start + 1, hdp_start);
   gps_hdp  = gps_read_buffer.substring(hdp_start + 1, alt_start);
   gps_altitude  = gps_read_buffer.substring(alt_start + 1, altu_start);
-  
+    
   //
   //	Extra error checking here to make sure things are valid
   //
@@ -1036,7 +1134,6 @@ void push_hsnmea_only_to_esp8266()
 
 void push_out_nmea_sentence(bool from_nmea_in)
 {
-
   if(!esp8266IsReady())
   {
     #ifdef SERIAL_DEBUG_ON
@@ -1093,6 +1190,7 @@ bool validate_gps_buffer()
   #ifdef GPS_DEBUG_ON
   debug_info(String(F("Bad GPS buffer: ")) + gps_read_buffer);
   #endif
+
   return false;  
 }
 
@@ -1163,12 +1261,14 @@ bool validate_nmea_buffer(bool hsnmea = false)
     debug_info(String(F("Bad NMEA buffer: ")) + nmea_read_buffer + ", Wanted: " + a_string);
   }
   #endif
+
   return false;  
 }
 
 
 void gps_read()
 {
+
   while(Serial1.available() && (int) gps_read_buffer.length() < MAX_GPS_BUFFER)
   {
     int incoming_byte = Serial1.read();
@@ -1188,8 +1288,15 @@ void gps_read()
             #ifdef GPS_SOURCE_DEBUG_ON
             debug_info(F("GPS RMC INTERNAL"));
             #endif
-            push_out_nmea_sentence(false);
-            parse_gps_buffer_as_rmc();
+            #ifdef N2K_CODE_ON
+            if(n2k_gps_valid == false)
+            {
+            #endif
+              push_out_nmea_sentence(false);
+              parse_gps_buffer_as_rmc(); 
+            #ifdef N2K_CODE_ON
+            }
+            #endif
 	  }
         }
         else if(gps_read_buffer.indexOf(F("$GPGGA,")) == 0)
@@ -1204,8 +1311,15 @@ void gps_read()
             #ifdef GPS_SOURCE_DEBUG_ON
             debug_info(F("GPS GGA INTERNAL"));
             #endif
-            push_out_nmea_sentence(false);
-            parse_gps_buffer_as_gga();
+            #ifdef N2K_CODE_ON
+            if(n2k_gps_valid == false)
+            {
+            #endif
+              push_out_nmea_sentence(false);  
+              parse_gps_buffer_as_gga();  
+            #ifdef N2K_CODE_ON
+            }
+            #endif
 	  }
         }
       }
@@ -1227,6 +1341,7 @@ void gps_read()
     #endif
     gps_read_buffer = "";
   }
+
 }
 
 
@@ -1458,7 +1573,7 @@ void report_state(bool console_only)
 
   if(!console_only)
   {
-    //send_message_to_esp8266();
+    send_message_to_esp8266();
   }
   echo_info(latest_message_to_send);
 
@@ -1584,16 +1699,32 @@ void update_leds()
     return;
   }
 
-  if(gps_valid)
+  if(n2k_gps_valid || 
+     (millis() - nmea_gga_timestamp < nmea_sample_interval && nmea_gga_timestamp != 0))
   {
-    digitalWrite(GPS_LED_1, LOW);
-    digitalWrite(GPS_LED_2, HIGH);
+      digitalWrite(GPS_LED_1, LOW);
+      digitalWrite(GPS_LED_2, LOW);
+      if(random(0,100) < 25)
+      {
+        digitalWrite(GPS_LED_1, LOW);
+        digitalWrite(GPS_LED_2, HIGH);
+      }
   }
   else
   {
-    digitalWrite(GPS_LED_1, HIGH);
-    digitalWrite(GPS_LED_2, LOW);
+    if(gps_valid)
+    {
+      digitalWrite(GPS_LED_1, LOW);
+      digitalWrite(GPS_LED_2, HIGH);
+    }
+    else
+    {
+      digitalWrite(GPS_LED_1, HIGH);
+      digitalWrite(GPS_LED_2, LOW);
+    }
   }
+
+
 
   if(currently_connected)
   {
@@ -2184,6 +2315,7 @@ void update_hsnmea()
 
 bool try_and_send_message_to_esp8266()
 {
+
   //
   //  Somewhat perversly, we take our time here as we want to be sure
   // nothing else is filling up the serial connection to the ESP (e.g.  NMEA
@@ -2221,10 +2353,11 @@ bool try_and_send_message_to_esp8266()
 
   plain[0] = 'S';
   plain[1] = '=';
-  if(Serial1.write(plain, 2) != 2)
+  if(Serial7.write(plain, 2) != 2)
   {
     return false;
   }
+
 
   unsigned int k = 0;
   for(i = 0; i < latest_message_to_send.length(); i = i + 32)
@@ -2233,7 +2366,7 @@ bool try_and_send_message_to_esp8266()
     {
       plain[k] = (char) latest_message_to_send.charAt(i + k);
     } 
-    if(Serial1.write(plain, k) != k)
+    if(Serial7.write(plain, k) != k)
     {
       return false;
     }
@@ -2256,7 +2389,7 @@ bool try_and_send_message_to_esp8266()
   {
     checksum =  String(F("@")) + checksum + String(F("\r\n"));
   }
-  if(Serial1.print(checksum) != 5)
+  if(Serial7.print(checksum) != 5)
   {
     return false;
   }
@@ -2419,6 +2552,10 @@ void setup()
   pinMode(A6, INPUT_PULLDOWN);  
   pinMode(A7, INPUT_PULLDOWN);  
 
+  //
+  // Arduino Strings
+  //
+  
   console_read_buffer.reserve(MAX_CONSOLE_BUFFER);
   esp8266_read_buffer.reserve(MAX_ESP8266_BUFFER);
   gps_read_buffer.reserve(MAX_GPS_BUFFER);
@@ -2523,13 +2660,20 @@ void setup()
   
   bhware_read();
   
+  //
+  //  If this is an N2K model, setup N2K
+  //
+
+  #ifdef N2K_CODE_ON
+  n2k_setup();
+  #endif
 
 
 }
 
 void loop()
 {
-  
+
   /*
       Obviously this is main execution loop. There are a number of values we read and actions we take base on timing
   */
@@ -2537,11 +2681,15 @@ void loop()
   unsigned long current_timestamp = millis();
  
 
+
+
   if(current_timestamp - gps_previous_timestamp >  gps_interval)
   {
     gps_previous_timestamp = current_timestamp;
     gps_read();
   } 
+
+
 
   if(current_timestamp - esp8266_previous_timestamp > esp8266_interval)
   {
@@ -2581,11 +2729,33 @@ void loop()
     update_nmea();
   }
   
+
   if(current_timestamp - hsnmea_previous_timestamp > hsnmea_update_interval)
   {
     hsnmea_previous_timestamp = current_timestamp;
     update_hsnmea();
   }
+
+
+
+  #ifdef N2K_CODE_ON
+
+  if(current_timestamp - n2k_previous_timestamp >  n2k_interval)
+  {
+    n2k_previous_timestamp = current_timestamp;
+    NMEA2000.ParseMessages();
+    //n2k_read();
+  } 
+
+
+  if(current_timestamp - n2k_output_previous_timestamp >  n2k_output_interval)
+  {
+    n2k_output_previous_timestamp = current_timestamp;
+    n2k_output();
+    //n2k_read();
+  } 
+
+  #endif
 
   
   /*
@@ -2593,7 +2763,7 @@ void loop()
   */
   
 
-/*
+
   if(currently_active == true)
   {
     if(current_timestamp - previous_active_timestamp >  active_reporting_interval)
@@ -2614,7 +2784,7 @@ void loop()
       previous_idle_timestamp = current_timestamp;
     }
   }
-*/
+
 
   if(current_timestamp - previous_console_timestamp >  console_reporting_interval)
   {
@@ -2657,6 +2827,7 @@ void loop()
   // Handle LED's to show communication state
   //
   
+
   if(current_timestamp - led_previous_timestamp > led_update_interval)
   {
     led_previous_timestamp = current_timestamp;

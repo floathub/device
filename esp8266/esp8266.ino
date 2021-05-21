@@ -2791,6 +2791,7 @@ bool openFdr()
   #ifdef WIFI_DEBUG_ON
   debug_info(F("Opening fdr socket ..."));
   #endif
+
   if(fdr_client.connect(float_hub_server.c_str(), float_hub_server_port))
   {
     
@@ -3412,6 +3413,8 @@ void parseInput(String &the_input)
   
   else if(the_input.startsWith("S=") && the_input.length() >= 5) // Minimum FHUB sentence length (?)
   {
+    Serial.print("COWABUNGA QUEING: ");
+    Serial.println(the_input.substring(2));
     queueMessage(the_input.substring(2));
   }
   #ifdef INPT_DEBUG_ON

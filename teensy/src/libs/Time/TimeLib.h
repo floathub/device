@@ -50,7 +50,7 @@ typedef struct  {
   uint8_t Day;
   uint8_t Month; 
   uint8_t Year;   // offset from 1970; 
-} 	tmElements_t, TimeElements, *tmElementsPtr_t;
+} 	tmElements_tt, TimeElements, *tmElementsPtr_t;
 
 //convenience macros to convert to and from tm years 
 #define  tmYearToCalendar(Y) ((Y) + 1970)  // full four digit year 
@@ -135,8 +135,8 @@ void    setSyncProvider( getExternalTime getTimeFunction); // identify the exter
 void    setSyncInterval(time_t interval); // set the number of seconds between re-sync
 
 /* low level functions to convert to and from system time                     */
-void breakTime(time_t time, tmElements_t &tm);  // break time_t into elements
-time_t makeTime(tmElements_t &tm);  // convert time elements into time_t
+void breakTime(time_t time, tmElements_tt &tm);  // break time_t into elements
+time_t makeTime(tmElements_tt &tm);  // convert time elements into time_t
 
 } // extern "C++"
 #endif // __cplusplus
