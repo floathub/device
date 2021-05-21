@@ -125,8 +125,8 @@
   Possibly n2k stuff
 */
 
-#include "n2k.h"
 #ifdef N2K_CODE_ON
+#include "n2k.h"
 // #define USE_MCP_CAN_CLOCK_SET 8
 // #define N2k_SPI_CS_PIN 11
 // #define N2k_CAN_INT_PIN 21 // Interrupt pin definition for Ardino Mega or other "CAN bus shield" boards.
@@ -1699,8 +1699,11 @@ void update_leds()
     return;
   }
 
-  if(n2k_gps_valid || 
-     (millis() - nmea_gga_timestamp < nmea_sample_interval && nmea_gga_timestamp != 0))
+  #ifdef N2K_CODE_ON
+  if(n2k_gps_valid || (millis() - nmea_gga_timestamp < nmea_sample_interval && nmea_gga_timestamp != 0))
+  #else
+  if(millis() - nmea_gga_timestamp < nmea_sample_interval && nmea_gga_timestamp != 0)
+  #endif
   {
       digitalWrite(GPS_LED_1, LOW);
       digitalWrite(GPS_LED_2, LOW);
