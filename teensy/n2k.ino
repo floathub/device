@@ -135,6 +135,8 @@ void n2k_setup()
 
 void HandleNMEA2000Messages(const tN2kMsg &N2kMsg)
 {
+  // Serial.print("I am switching on ");
+  // Serial.println(N2kMsg.PGN);
   
   switch (N2kMsg.PGN) {
     case 127250UL: HandleHeading(N2kMsg); break;
@@ -158,7 +160,7 @@ void HandleNMEA2000Messages(const tN2kMsg &N2kMsg)
 
 void HandleHeading(const tN2kMsg &N2kMsg)
 {
-  Serial.println("Actually here in Handle Heading ...");
+
   unsigned char SID;
   tN2kHeadingReference HeadingReference;
   double a_heading;
@@ -289,11 +291,9 @@ void HandleGNSS(const tN2kMsg &N2kMsg)
   tN2kGNSStype GNSStype;
   tN2kGNSSmethod GNSSmethod;
   double PDOP;
-  double GeoidalSeparation;
   unsigned char nReferenceStations;
   tN2kGNSStype ReferenceStationType;
   uint16_t ReferenceStationID;
-  double AgeOfCorrection;
   double fix_age    = N2kDoubleNA;
   
 
@@ -391,7 +391,7 @@ unsigned char get_battery(unsigned char instance)
     //Serial.print(instance);
     //Serial.print(" to position ");
     //Serial.println(lowest_available);
-    n2k_battery_map[lowest_available] = instance; 
+    //n2k_battery_map[lowest_available] = instance; 
     return lowest_available;
   }
   
@@ -400,6 +400,7 @@ unsigned char get_battery(unsigned char instance)
 
 void HandleBattery(const tN2kMsg &N2kMsg)
 {
+  // Serial.println("COWABUNGA: Here I am in handle battery"); 
   unsigned char SID;
   unsigned char instance;
   unsigned char mapped_instance;
@@ -510,8 +511,22 @@ void push_out_message(const tNMEA0183Msg &NMEA0183Msg)
     parse_gps_buffer_as_gga();
     gps_read_buffer = "";
   }
+  else if(
+           strncmp(NMEA0183Msg.MessageCode(), "HDG", 3) == 0  ||
+           strncmp(NMEA0183Msg.MessageCode(), "HDM", 3) == 0  ||
+           strncmp(NMEA0183Msg.MessageCode(), "HDT", 3) == 0  ||
+           strncmp(NMEA0183Msg.MessageCode(), "DPT", 3) == 0  ||
+           strncmp(NMEA0183Msg.MessageCode(), "MTW", 3) == 0  ||
+           strncmp(NMEA0183Msg.MessageCode(), "VHW", 3) == 0  ||
+           strncmp(NMEA0183Msg.MessageCode(), "MWV", 3) == 0 
+         )
+  {
+    a_string = nmea_read_buffer;
+    nmea_read_buffer = buffer;
+    parse_nmea_sentence();
+    nmea_read_buffer = a_string; 
+  }
 }
-
 
 void n2k_output()
 {
@@ -678,12 +693,29 @@ void n2k_output()
       push_out_message(NMEA0183Msg);
     }
   }
+  else if(n2k_output_cycle == 6)
+  {
+    //
+    //  Build a custom 0183 Message as the library does not natively support MTW
+    //
+    
+    if( !N2kIsNA(n2k_water_temperature) )
+    {
+      tNMEA0183Msg NMEA0183Msg;
+       if ( 
+            NMEA0183Msg.Init("MTW", "II") && 
+            NMEA0183Msg.AddDoubleField(n2k_water_temperature -  273.15, 1,tNMEA0183Msg::DefDoubleFormat,"C")
+          )
+       {
+         push_out_message(NMEA0183Msg);
+       }
+    }
+  }
   n2k_output_cycle += 1;
-  if(n2k_output_cycle >= 6)
+  if(n2k_output_cycle >= 7)
   {
     n2k_output_cycle = 0;
   }
-  
 }
 
 

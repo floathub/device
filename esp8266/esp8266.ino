@@ -3413,8 +3413,6 @@ void parseInput(String &the_input)
   
   else if(the_input.startsWith("S=") && the_input.length() >= 5) // Minimum FHUB sentence length (?)
   {
-    Serial.print("COWABUNGA QUEING: ");
-    Serial.println(the_input.substring(2));
     queueMessage(the_input.substring(2));
   }
   #ifdef INPT_DEBUG_ON

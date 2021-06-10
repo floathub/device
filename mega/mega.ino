@@ -203,9 +203,8 @@ float           speed_vector[7];
    Some global Strings, character arrays
 */
 
-//  COWABUNGA
-//#define MAX_LATEST_MESSAGE_SIZE 256
-#define MAX_LATEST_MESSAGE_SIZE 64
+#define MAX_LATEST_MESSAGE_SIZE 256
+// #define MAX_LATEST_MESSAGE_SIZE 64
 String latest_message_to_send = "";
 String a_string = "";
 String b_string = "";

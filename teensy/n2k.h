@@ -89,7 +89,7 @@ unsigned long n2k_wind_apparent_timestamp;
 //  Batteries
 //
 
-#define MAX_N2K_BATTERIES 10
+#define MAX_N2K_BATTERIES 6
 unsigned char  n2k_battery_map[MAX_N2K_BATTERIES];
 double         n2k_battery_voltage[MAX_N2K_BATTERIES];
 unsigned long  n2k_battery_timestamp[MAX_N2K_BATTERIES];

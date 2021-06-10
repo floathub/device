@@ -29,7 +29,7 @@
   Is this an n2k version?
 */
 
-// #define N2K_CODE_ON
+#define N2K_CODE_ON
 
 
 
