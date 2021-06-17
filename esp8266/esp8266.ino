@@ -113,6 +113,7 @@ String	      web_interface_password;		// default: floathub
 unsigned int  udp_broadcast_port;		// default: 2000
 float	      speed_threshold;			// default: 1.75 (knots)
 byte	      stationary_interval;		// default: 10 (minutes)
+uint16_t      conversion_flags;			// default  0b1010101010101010
 
 
 //
@@ -566,6 +567,26 @@ void init_eeprom_memory()
 
   EEPROM.write(332, 10); 	// Default stationary reporting interval of 10 minutes
 
+  EEPROM.write(333, 0b00101010); //  Default conversion flags.
+  EEPROM.write(334, 0b11011001); // Bit Conversion (G=GPS, 2=N2K, 1=0183)
+                                 //  0	G-2-1
+                                 //  1	G-1-2
+                                 //  2	E-I-2
+                                 //  3	E-I-1
+                                 //  4	E-2-1
+                                 //  5	E-1-2
+                                 //  6	B-I-2
+                                 //  7	N-2-1
+                                 //  8	N-1-2
+                                 //  9	D-2-1
+                                 //  10	D-1-2
+                                 //  11	W-2-1
+                                 //  12	W-1-2
+                                 //  13	A-2-1
+                                 //  14	A-1-2
+                                 //  15 always 1 !!!!!
+
+
   //
   // Web interface username and password
   //
@@ -693,6 +714,8 @@ void write_eeprom_memory()
   EEPROM.write(330, highByte(temp_int));
   EEPROM.write(331, lowByte(temp_int));
   EEPROM.write(332, stationary_interval);
+  EEPROM.write(333, highByte(conversion_flags));
+  EEPROM.write(334, lowByte(conversion_flags));
   
  
   //
@@ -836,6 +859,13 @@ void read_eeprom_memory()
   temp_int += EEPROM.read(330) * 256;
   speed_threshold = temp_int / 100.0 ; 
   stationary_interval = EEPROM.read(332);
+
+  //
+  // Conversion flags
+  //
+  
+  conversion_flags  = EEPROM.read(334);
+  conversion_flags += EEPROM.read(333) * 256;
 
   //
   //  Phone home?
@@ -1895,6 +1925,30 @@ void handleAdvanced()
       checkPort(virtual_serial_port);
       virtual_serial_changed = true;
     }
+    
+    String new_cflags = web_server.arg("cflags");
+    if(new_cflags.length() == 16)
+    {
+      uint16_t new_cflags_value = 32768;
+      bool no_errors = true;
+      for(int i = 15; i > 0; i--)
+      {
+        if(new_cflags[i] == '1')
+        {
+          new_cflags_value = new_cflags_value + pow(2, 15-i);
+        }
+        else if (new_cflags[i] != '0')
+        {
+          no_errors = false;
+        }
+      } 
+      if(no_errors)
+      {
+        conversion_flags = new_cflags_value;
+      }
+    }
+    
+    
     write_eeprom_memory(); 
 
     if(virtual_serial_changed)
@@ -1941,6 +1995,9 @@ void handleAdvanced()
     page += " checked";
   }
   page += "><br>";
+  page += "<label for='cflags'>Conversion Flags: </label>";
+  page += "<input type='number' name='cflags' length='16' maxlength='16' value='" + String(conversion_flags, BIN) + "' ><br>";
+  page += "<br>";
   page += "<button type='submit' name='savebutton' value='True'>Save</button>";
   page += "</form></div><br>";
 
@@ -2237,6 +2294,9 @@ void displayCurrentVariables()
   help_info(String(F("r=")) + relay_ais_data); 
   #ifdef CELLULAR_CODE_ON
   help_info(String(F("R=")) + relay_ais_cellular); 
+  #endif
+  #ifdef N2K_CODE_ON
+  help_info(String(F("l=")) + String(conversion_flags, BIN)); 
   #endif
   help_info(String(F("C=")) + force_wifi_connect); 
   help_info(String(F("u=")) + web_interface_username); 
@@ -4013,12 +4073,53 @@ void parseInput(String &the_input)
   }
   #endif
 
+  else if(the_input.startsWith("l=") && the_input.length() >= 18)
+  {
+    bool no_errors = true;
+    uint16_t new_flags = 32768;
+    for(i=17; i>2; i--)
+    {
+      if(the_input[i] == '1')
+      {
+        new_flags = new_flags + pow(2, 17-i);
+      }
+      else if (the_input[i] != '0')
+      {
+        no_errors = false;
+      }
+    }
+    if (no_errors)
+    {
+      conversion_flags = new_flags;
+      write_eeprom_memory;
+      help_info("l=" + String(new_flags, BIN));
+    }    
+    #ifdef INPT_DEBUG_ON
+    else
+    {
+      debug_info(String(F("Bad input: ")) + the_input);
+    }
+    #endif
+  }
+
   #ifdef INPT_DEBUG_ON
   else
   {
     debug_info(String(F("Bad input: ")) + the_input);
   }
   #endif
+
+  else if(the_input.startsWith("l=") && the_input.length() >= 20)
+  {
+  }
+  #ifdef INPT_DEBUG_ON
+  else if(the_input.startsWith("t="))
+  {
+    debug_info(F("Short input"));
+  }
+  #endif
+
+
 }
 
 
@@ -4285,20 +4386,24 @@ void heartbeatHouseKeeping()
   {
     internal_info(String(F("T=")) + stationary_interval);
   }
+  else if(heartbeat_cycle == 6)
+  {
+    internal_info(String(F("l=")) + String(conversion_flags, BIN));
+  }
 
   #ifdef CELLULAR_CODE_ON
-  else if(heartbeat_cycle == 6)
+  else if(heartbeat_cycle == 7)
   {
     internal_info(String(F("d=")) + cellular_link_up); 
   }
   heartbeat_cycle++;
-  if(heartbeat_cycle >=7)
+  if(heartbeat_cycle >=8)
   {
     heartbeat_cycle = 0;
   }
   #else
   heartbeat_cycle++;
-  if(heartbeat_cycle >=6)
+  if(heartbeat_cycle >=7)
   {
     heartbeat_cycle = 0;
   }

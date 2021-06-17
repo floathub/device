@@ -9,9 +9,10 @@
 
 */
 
+// #include <NMEA2000_CAN.h>  // This will automatically choose right CAN library and create suitable NMEA2000 object
 #include <NMEA0183.h>
 #include <NMEA2000.h>
-
+#include <NMEA0183AISMessages.h>
 
 #ifndef N2K_VARIABLES
 #define N2K_VARIABLES
@@ -94,25 +95,37 @@ unsigned char  n2k_battery_map[MAX_N2K_BATTERIES];
 double         n2k_battery_voltage[MAX_N2K_BATTERIES];
 unsigned long  n2k_battery_timestamp[MAX_N2K_BATTERIES];
 
+//
+//  Need one of these objects for AIS messages
+//
 
-//  double Variation;
- 
-/* 
-  double Heading;
-  double COG;
-  double SOG;
-  double WindSpeed;
-  double WindAngle;
-  unsigned long LastHeadingTime;
-  unsigned long LastCOGSOGTime;
-  unsigned long LastPositionTime;
-  unsigned long LastPosSend;
-  unsigned long LastWindTime;
-  uint16_t DaysSince1970;
-  double SecondsSinceMidnight;
-  unsigned long NextRMCSend;
-*/
+tNMEA0183AISMsg NMEA0183AISMsg;
 
+//
+//  Conversion flags
+//
+
+bool FLAG_GPS_N2K_TO_NMEA;
+bool FLAG_GPS_NMEA_TO_N2K;
+
+bool FLAG_ENV_INT_TO_N2K;
+bool FLAG_ENV_INT_TO_NMEA;
+bool FLAG_ENV_N2K_TO_NMEA;
+bool FLAG_ENV_NMEA_TO_N2K;
+
+bool FLAG_VOL_INT_TO_N2K;
+
+bool FLAG_NAV_N2K_TO_NMEA;
+bool FLAG_NAV_NMEA_TO_N2K;
+
+bool FLAG_DEP_N2K_TO_NMEA;
+bool FLAG_DEP_NMEA_TO_N2K;
+
+bool FLAG_WIN_N2K_TO_NMEA;
+bool FLAG_WIN_NMEA_TO_N2K;
+
+bool FLAG_AIS_N2K_TO_NMEA;
+bool FLAG_AIS_NMEA_TO_N2K;
 
 #endif
 

@@ -4,6 +4,9 @@
   (c) 2011-2021 Modiot Labs
   (begun June 6, 2011)
 
+  June 2021
+  Initial N2k work completed including AIS translation
+
   February 2021 
   Reworked to run on a Teensy rather than the original Arduino Mega
 
@@ -127,24 +130,9 @@
 
 #ifdef N2K_CODE_ON
 #include "n2k.h"
-// #define USE_MCP_CAN_CLOCK_SET 8
-// #define N2k_SPI_CS_PIN 11
-// #define N2k_CAN_INT_PIN 21 // Interrupt pin definition for Ardino Mega or other "CAN bus shield" boards.
-#include <NMEA2000_CAN.h>  // This will automatically choose right CAN library and create suitable NMEA2000 object
-//#include "N2kDataToNMEA0183.h"
-//#include <N2kMsg.h>
-//#include <NMEA2000.h>
-//#include <N2kMessages.h>
-
-
-// #include "BoardSerialNumber.h"
-
-//#ifdef ARDUINO
-//#define NMEA0183_Out_Stream_Speed 115200
-//#define NMEA0183_Out_Stream Serial
-
 const unsigned long TransmitMessages[] PROGMEM={0};
-const unsigned long ReceiveMessages[] PROGMEM={/*126992L,*/127250UL,127258UL,128259UL,128267UL,129025UL,129026L,129029L,0};
+const unsigned long ReceiveMessages[] PROGMEM={127250UL,127258UL,128259UL,128267UL,129025UL,129026L,129029L,129038L,129039L,129794L,129809L,129810L,130306L,130310L,0};
+#include <NMEA2000_CAN.h>  
 #endif
 
 /*
@@ -152,7 +140,7 @@ const unsigned long ReceiveMessages[] PROGMEM={/*126992L,*/127250UL,127258UL,128
 */
 #include <EEPROM.h>
 #include "src/libs/Time/Time.h"
-
+#include <Entropy.h>
 
 /*
   Watchdog setup
@@ -250,12 +238,8 @@ unsigned long hsnmea_update_interval = 10;		//  Update HS NMEA (SoftwareSerial b
 unsigned long hardware_watchdog_interval = 120; 	//  Do a hardware reset if we don't pat the dog every 2 minutes
 unsigned long nmea_sample_interval = 30000;		//  Nuke nmea data older than 30 seconds
 #ifdef N2K_CODE_ON
-//unsigned long n2k_interval = 1;			        //  Read N2K data 500 times a second
-unsigned long n2k_output_interval = 300;	        //  Output n2k data (as 0183) once every 1/3 of a second
+unsigned long n2k_output_interval = 200;	        //  Output n2k data (as 0183) once every 1/5th of a second
 unsigned long n2k_interval = 10;			//  Read N2K data 100 times a second
-//unsigned long n2k_interval = 2;			//  Read N2K data 10 times a second
-//unsigned long n2k_interval = 1000;			//  Read N2K data 10 times a second
-//unsigned long n2k_interval = 5000;			//  Read N2K data 10 times a second
 #endif 
   
   
@@ -323,8 +307,8 @@ float temperature_vector[OUTLIER_VECTOR_SIZE];
   Some global variables used in parsing (e.g. from the GPS module)
 */
 
-#define	MAX_CONSOLE_BUFFER  255
-#define	MAX_ESP8266_BUFFER  2048
+#define	MAX_CONSOLE_BUFFER  100
+#define	MAX_ESP8266_BUFFER  255
 #define MAX_GPS_BUFFER	    100
 #define	MAX_NMEA_BUFFER	    100
 
@@ -502,6 +486,51 @@ void parse_esp8266()
     { 
       mac_address = esp8266_read_buffer.substring(22,34);
     }
+
+    #ifdef N2K_CODE_ON
+    else if(esp8266_read_buffer.length() == 38 && esp8266_read_buffer.substring(20).startsWith(F("l=")))
+    { 
+      //
+      // Conversion flags (e.g. l=1111111100000000)
+      //
+
+      FLAG_GPS_N2K_TO_NMEA = false; FLAG_GPS_NMEA_TO_N2K = false; FLAG_ENV_INT_TO_N2K  = false; FLAG_ENV_INT_TO_NMEA = false;
+      FLAG_ENV_N2K_TO_NMEA = false; FLAG_ENV_NMEA_TO_N2K = false; FLAG_VOL_INT_TO_N2K  = false; FLAG_NAV_N2K_TO_NMEA = false;
+      FLAG_NAV_NMEA_TO_N2K = false; FLAG_DEP_N2K_TO_NMEA = false; FLAG_DEP_NMEA_TO_N2K = false; FLAG_WIN_N2K_TO_NMEA = false;
+      FLAG_WIN_NMEA_TO_N2K = false; FLAG_AIS_N2K_TO_NMEA = false; FLAG_AIS_NMEA_TO_N2K = false;
+     
+      if(esp8266_read_buffer[37] == '1')
+        FLAG_GPS_N2K_TO_NMEA = true;
+      if(esp8266_read_buffer[36] == '1')
+        FLAG_GPS_NMEA_TO_N2K = true;
+      if(esp8266_read_buffer[35] == '1')
+        FLAG_ENV_INT_TO_N2K = true;
+      if(esp8266_read_buffer[34] == '1')
+        FLAG_ENV_INT_TO_NMEA = true;
+      if(esp8266_read_buffer[33] == '1')
+        FLAG_ENV_N2K_TO_NMEA = true;
+      if(esp8266_read_buffer[32] == '1')
+        FLAG_ENV_NMEA_TO_N2K = true;
+      if(esp8266_read_buffer[31] == '1')
+        FLAG_VOL_INT_TO_N2K = true;
+      if(esp8266_read_buffer[30] == '1')
+        FLAG_NAV_N2K_TO_NMEA = true;
+      if(esp8266_read_buffer[29] == '1')
+        FLAG_NAV_NMEA_TO_N2K = true;
+      if(esp8266_read_buffer[28] == '1')
+        FLAG_DEP_N2K_TO_NMEA = true;
+      if(esp8266_read_buffer[27] == '1')
+        FLAG_DEP_NMEA_TO_N2K = true;
+      if(esp8266_read_buffer[26] == '1')
+        FLAG_WIN_N2K_TO_NMEA = true;
+      if(esp8266_read_buffer[25] == '1')
+        FLAG_WIN_NMEA_TO_N2K = true;
+      if(esp8266_read_buffer[24] == '1')
+        FLAG_AIS_N2K_TO_NMEA = true;
+      if(esp8266_read_buffer[23] == '1')
+        FLAG_AIS_NMEA_TO_N2K = true;
+    }
+    #endif
   }
   else
   {
@@ -2235,7 +2264,6 @@ void parse_hsnmea_sentence()
   }
 }
 
-
 void update_nmea()
 {
   bool keep_going = true;
@@ -2248,6 +2276,9 @@ void update_nmea()
        {
          push_out_nmea_sentence(true);
          parse_nmea_sentence();
+         #ifdef N2K_CODE_ON
+         possibly_convert_nmea_sentence(nmea_read_buffer);
+         #endif
        }
        nmea_read_buffer = "";
        keep_going = false;
@@ -2285,6 +2316,9 @@ void update_hsnmea()
         #endif
         push_hsnmea_only_to_esp8266();   
         parse_hsnmea_sentence();
+        #ifdef N2K_CODE_ON
+        possibly_convert_nmea_sentence(hsnmea_read_buffer);
+        #endif
       }
       #ifdef SOFTSERIAL_DEBUG_ON
       else
@@ -2413,8 +2447,7 @@ void factoryReset()
   digitalWrite(COM_LED_1, LOW);
   digitalWrite(COM_LED_2, LOW);
 
-  //Serial7.println("FactoryResetNow");
-  resetESP();
+  Serial7.println("FactoryResetNow");
   init_eeprom_memory();
   resetFunc();
 }
@@ -2439,6 +2472,7 @@ void  send_message_to_esp8266()
     send_message_failures++;
     if(send_message_failures > MAX_SEND_MESSAGE_FAILURES)
     {
+      delay(5000);
       dualReboot();
     }
   }
@@ -2618,7 +2652,8 @@ void setup()
   //  Seed the random number generator
   //
   
-  randomSeed(analogRead(A14));
+  Entropy.Initialize();
+  randomSeed(Entropy.random());
   
   //
   //  Setup LED pins, initial is red on both
@@ -2743,6 +2778,7 @@ void loop()
 
   #ifdef N2K_CODE_ON
 
+
   if(current_timestamp - n2k_previous_timestamp >  n2k_interval)
   {
     n2k_previous_timestamp = current_timestamp;
@@ -2751,12 +2787,15 @@ void loop()
   } 
 
 
+
+
   if(current_timestamp - n2k_output_previous_timestamp >  n2k_output_interval)
   {
     n2k_output_previous_timestamp = current_timestamp;
     n2k_output();
     //n2k_read();
   } 
+
 
   #endif
 

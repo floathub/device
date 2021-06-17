@@ -8,9 +8,8 @@
 //#include <math.h>
 
 
-#define N2K_RAPID_VALID_DURATION	 2000UL		// N2K Rapid data valid for 2 seconds
-#define N2K_NORMAL_VALID_DURATION	10000UL		// N2K Normal data valid for 10 seconds
-
+#define N2K_RAPID_VALID_DURATION	2000UL		// N2K Rapid data valid for 2 second
+#define N2K_NORMAL_VALID_DURATION	7000UL		// N2K Normal data valid for 7 seconds
 
 
 void n2k_setup()
@@ -47,8 +46,6 @@ void n2k_setup()
   n2k_hdp        = N2kDoubleNA;
   n2k_altitude   = N2kDoubleNA;
   n2k_fix_geosep = N2kDoubleNA;
-  //n2k_fix_age    = N2kDoubleNA;
-  //n2k_fix_refid  = N2kUInt16NA;
   n2k_fix_timestamp = 0;
   n2k_fix_days_1970 = 0;
   n2k_fix_seconds = 0;
@@ -74,69 +71,82 @@ void n2k_setup()
 
 
   n2k_output_cycle = 0;
+
+  //
+  // Default flags (this will get overwritten fairly quickly by the ESP)
+  //
+
+  FLAG_GPS_N2K_TO_NMEA = true;
+  FLAG_GPS_NMEA_TO_N2K = true;
+
+  FLAG_ENV_INT_TO_N2K = true;
+  FLAG_ENV_INT_TO_NMEA = true;
+  FLAG_ENV_N2K_TO_NMEA = true;
+  FLAG_ENV_NMEA_TO_N2K = true;
+
+  FLAG_VOL_INT_TO_N2K = true;
+
+  FLAG_NAV_N2K_TO_NMEA = true;
+  FLAG_NAV_NMEA_TO_N2K = true;
+
+  FLAG_DEP_N2K_TO_NMEA = true;
+  FLAG_DEP_NMEA_TO_N2K = true;
+
+  FLAG_WIN_N2K_TO_NMEA = true;
+  FLAG_WIN_NMEA_TO_N2K = true;
+
+  FLAG_AIS_N2K_TO_NMEA = true;
+  FLAG_AIS_NMEA_TO_N2K = true;
+
   
-  // Setup NMEA2000 system
+  //
+  // Set some buffer sizes
+  //
 
-  //#ifndef ARDUINO
-  //setvbuf (stdout, NULL, _IONBF, 0); // No buffering on stdout, just send chars as they come.
-  //#endif
+  NMEA2000.SetN2kCANMsgBufSize(100);
+  NMEA2000.SetN2kCANReceiveFrameBufSize(250);
+  NMEA2000.SetN2kCANSendFrameBufSize(150);
 
-  //#ifdef ARDUINO
-  //#ifdef N2kForward_Stream
-  //N2kForward_Stream.begin(N2kForward_Stream_Speed);
-  //#endif
-  //NMEA0183_Out_Stream.begin(NMEA0183_Out_Stream_Speed);
-  //delay(1000); // Give some time for serial to initialize
-  //#else
-  //#endif
+  uint32_t serial_number = random(0, 999999999);
+  #if defined ARDUINO_TEENSY41
+  serial_number = HW_OCOTP_MAC0 & 0xFFFFFF;
+  #endif
+  char serial_number_chars[33];
+  snprintf(serial_number_chars,32,"%lu",(long unsigned int)serial_number);
 
-  //#ifdef N2kForward_Stream
-  //NMEA2000.SetForwardStream(&N2kForward_Stream);
-  //#endif
-
-  //char SnoStr[33];
-  //uint32_t SerialNumber=GetSerialNumber();
-  //snprintf(SnoStr,32,"%lu",(long unsigned int)SerialNumber);
-
-  NMEA2000.SetProductInformation("FloatHub N2K", // Manufacturer's Model serial code
+  // Product Info
+  NMEA2000.SetProductInformation(serial_number_chars, // Manufacturer's Model serial code
                                  120, // Manufacturer's product code
-                                 "N2K",  // Manufacturer's Model ID
-                                 "2.3.1",  // Manufacturer's Software version code
-                                 "P9.N2" // Manufacturer's Model version
+                                 "FloatHub N2K",  // Manufacturer's Model ID
+                                 "2.4.0",  // Manufacturer's Software version code
+                                 "P9.N3" // Manufacturer's Model version
                                  );
   // Set device information
   
-  
-  NMEA2000.SetDeviceInformation(7654321, // Unique number. Use e.g. Serial number.
+  NMEA2000.SetDeviceInformation(serial_number, // Unique number. Use e.g. Serial number.
                                 130, // Device function=PC Gateway. See codes on http://www.nmea.org/Assets/20120726%20nmea%202000%20class%20%26%20function%20codes%20v%202.00.pdf
                                 25, // Device class=Inter/Intranetwork Device. See codes on http://www.nmea.org/Assets/20120726%20nmea%202000%20class%20%26%20function%20codes%20v%202.00.pdf
                                 2319 // Just choosen free from code list on http://www.nmea.org/Assets/20121020%20nmea%202000%20registration%20list.pdf
                                );
-  
 
-  NMEA2000.SetForwardType(tNMEA2000::fwdt_Text); // Show in clear text. Leave uncommented for default Actisense format.
+  NMEA2000.SetForwardType(tNMEA2000::fwdt_Text); 
   NMEA2000.SetMode(tNMEA2000::N2km_ListenAndNode,25);
   NMEA2000.EnableForward(false);
 
   NMEA2000.ExtendTransmitMessages(TransmitMessages);
   NMEA2000.ExtendReceiveMessages(ReceiveMessages);
-  //NMEA2000.AttachMsgHandler(&N2kDataToNMEA0183);
   NMEA2000.SetMsgHandler(HandleNMEA2000Messages);
 
   NMEA2000.Open();
 
-  // Setup NMEA0183 ports and handlers
-  //NMEA0183_Out.SetMessageStream(&NMEA0183_Out_Stream);
-  //NMEA0183_Out.Open();
-  
 }
 
 
 
 void HandleNMEA2000Messages(const tN2kMsg &N2kMsg)
 {
-  // Serial.print("I am switching on ");
-  // Serial.println(N2kMsg.PGN);
+  //Serial.print("I am switching on ");
+  //Serial.println(N2kMsg.PGN);
   
   switch (N2kMsg.PGN) {
     case 127250UL: HandleHeading(N2kMsg); break;
@@ -149,11 +159,13 @@ void HandleNMEA2000Messages(const tN2kMsg &N2kMsg)
     case 130310UL: HandleEnvironment(N2kMsg); break;
     case 130306UL: HandleWind(N2kMsg); break;
     case 127508UL: HandleBattery(N2kMsg); break;
-    case 129038UL: 
-    case 129039UL: 
-    case 129794UL: 
-    case 129809UL: 
-    case 129810UL: HandleAIS(N2kMsg); break;
+
+    case 129038UL: HandleAISClassAPosition(N2kMsg); break;
+    case 129039UL: HandleAISClassBPosition(N2kMsg); break;
+    case 129794UL: HandleAISClassAStatic(N2kMsg); break;
+    case 129809UL: HandleAISClassBStaticPartA(N2kMsg); break;
+    case 129810UL: HandleAISClassBStaticPartB(N2kMsg); break;
+
   }
 }
 
@@ -316,8 +328,6 @@ void HandleGNSS(const tN2kMsg &N2kMsg)
       n2k_hdp        = N2kDoubleNA;
       n2k_altitude   = N2kDoubleNA;
       n2k_fix_geosep = N2kDoubleNA;
-      //n2k_fix_age    = N2kDoubleNA;
-      //n2k_fix_refid  = N2kUInt16NA;
       n2k_fix_timestamp = 0;
       n2k_fix_valid = false;
       
@@ -373,10 +383,6 @@ unsigned char get_battery(unsigned char instance)
   {
     if(n2k_battery_map[i] == instance)
     {
-      //Serial.print("COWABUNGA: Existing Map ");
-      //Serial.print(instance);
-      //Serial.print(" to position ");
-      //Serial.println(i);
       return i;
     }
     else if (n2k_battery_map[i] == 254 && lowest_available > i)
@@ -387,11 +393,6 @@ unsigned char get_battery(unsigned char instance)
   
   if (lowest_available < MAX_N2K_BATTERIES)
   {
-    //Serial.print("COWABUNGA: Mapped ");
-    //Serial.print(instance);
-    //Serial.print(" to position ");
-    //Serial.println(lowest_available);
-    //n2k_battery_map[lowest_available] = instance; 
     return lowest_available;
   }
   
@@ -400,7 +401,6 @@ unsigned char get_battery(unsigned char instance)
 
 void HandleBattery(const tN2kMsg &N2kMsg)
 {
-  // Serial.println("COWABUNGA: Here I am in handle battery"); 
   unsigned char SID;
   unsigned char instance;
   unsigned char mapped_instance;
@@ -417,48 +417,12 @@ void HandleBattery(const tN2kMsg &N2kMsg)
   }
 }
 
-void HandleAIS(const tN2kMsg &N2kMsg)
-{
 
-/*  
-  uint8_t MessageID; 
-  tN2kAISRepeat Repeat; 
-  uint32_t UserID;
-  double Latitude;
-  double Longitude;
-  bool Accuracy;
-  bool RAIM;
-  uint8_t Seconds;
-  double COG;
-  double SOG;
-  double Heading;
-  double ROT;
-  tN2kAISNavStatus NavStatus;
 
-  if ( ParseN2kPGN129038(N2kMsg, MessageID, Repeat, UserID, Latitude, Longitude, Accuracy, RAIM, Seconds, COG, SOG, Heading, ROT, NavStatus))
-  {
-    //Serial.print("COWABUNGA: AIS target going at ");
-    //Serial.println(SOG);
-    Serial.print("COWABUNGA: AIS byte length of ");
-    Serial.println(N2kMsg.DataLen);
-  }
-*/  
-
-  //char encoded[300];
-  //int length = base64_encode(encoded, N2kMsg.Data, N2kMsg.DataLen);
-  //encoded[length] = '\0';
-  //Serial.print("COWABUNGA: B64 encoded of PGN ");
-  //Serial.println(N2kMsg.PGN);
-  //Serial.print("length is ");
-  //Serial.println(length);
-  //Serial.print("COWABUNGA B64: ");
-  //Serial.println(encoded);
-  
-}
-
-void push_out_message(const tNMEA0183Msg &NMEA0183Msg)
+void push_out_message(const tNMEA0183Msg &NMEA0183Msg, bool send_to_nmea_flag = true)
 {
   //char buffer[MAX_NMEA0183_MSG_BUF_LEN];
+
   char buffer[MAX_NMEA0183_MSG_BUF_LEN]={NMEA0183Msg.GetPrefix(),0};
   strlcat(buffer, NMEA0183Msg.Sender(), MAX_NMEA0183_MSG_BUF_LEN);
   strlcat(buffer, NMEA0183Msg.MessageCode(), MAX_NMEA0183_MSG_BUF_LEN);
@@ -472,19 +436,25 @@ void push_out_message(const tNMEA0183Msg &NMEA0183Msg)
   strlcat(buffer, buf, MAX_NMEA0183_MSG_BUF_LEN);
 
   //
-  // OK, buffer has our message. Send to ESP (WiFi) if we can
+  // OK, buffer has our message. Send to ESP (WiFi) if we can and should
   //
 
-  if(esp8266IsReady())
+
+  if(send_to_nmea_flag == true || strncmp(NMEA0183Msg.MessageCode(), "VDM", 3) == 0 || strncmp(NMEA0183Msg.MessageCode(), "VDO", 3) == 0)
   {
-    Serial7.print(F("E="));
-    Serial7.println(buffer);
+    if(esp8266IsReady())
+    {
+      Serial7.print(F("E="));
+      Serial7.println(buffer);
+    }
   }
+
 
   //
   // As long as we are in NMEA mode (not console mode), print to the console
   //
-  if(console_mode == false)
+
+  if(console_mode == false && send_to_nmea_flag == true)
   {
     Serial.println(buffer);
   }
@@ -493,10 +463,13 @@ void push_out_message(const tNMEA0183Msg &NMEA0183Msg)
   // Send to NMEA out screw terminals
   //
 
-  Serial8.println(buffer);
+  if( send_to_nmea_flag == true)
+  {
+    Serial8.println(buffer);
+  }
 
   //
-  // If it is GGA or RMC, parse it for Fix, time, etc.
+  // If it is GGA, RMC, etc., parse it for Fix, time, etc.
   //
   
   if(strncmp(NMEA0183Msg.MessageCode(), "RMC", 3) == 0 && n2k_gps_valid)
@@ -525,6 +498,140 @@ void push_out_message(const tNMEA0183Msg &NMEA0183Msg)
     nmea_read_buffer = buffer;
     parse_nmea_sentence();
     nmea_read_buffer = a_string; 
+  }
+
+}
+
+
+
+
+void HandleAISClassAPosition(const tN2kMsg &N2kMsg)
+{
+  unsigned char SID;
+  tN2kAISRepeat _Repeat;
+  uint32_t _UserID;
+  double _Latitude;
+  double _Longitude;
+  bool _Accuracy;
+  bool _RAIM;
+  uint8_t _Seconds;
+  double _COG;
+  double _SOG;
+  double _Heading;
+  double _ROT;
+  tN2kAISNavStatus _NavStatus;
+
+  uint8_t _MessageType = 1;
+
+  if ( ParseN2kPGN129038(N2kMsg, SID, _Repeat, _UserID, _Latitude, _Longitude, _Accuracy, _RAIM, _Seconds, _COG, _SOG, _Heading, _ROT, _NavStatus ) )
+  {
+    if ( SetAISClassABMessage1(NMEA0183AISMsg, _MessageType, _Repeat, _UserID, _Latitude, _Longitude, _Accuracy, _RAIM, _Seconds, _COG, _SOG, _Heading, _ROT, _NavStatus ) ) 
+    {
+      push_out_message(NMEA0183AISMsg, FLAG_AIS_N2K_TO_NMEA);
+    }
+  }
+}
+
+void HandleAISClassBPosition(const tN2kMsg &N2kMsg)
+{
+
+  uint8_t _MessageID = 18;
+  tN2kAISRepeat _Repeat;
+  uint32_t _UserID; 
+  double _Latitude;
+  double _Longitude;
+  bool _Accuracy;
+  bool _RAIM;
+  uint8_t _Seconds;
+  double _COG;
+  double _SOG;
+  double _Heading;
+  tN2kAISUnit _Unit;
+  bool _Display, _DSC, _Band, _Msg22, _State;
+  tN2kAISMode _Mode;
+
+  if ( ParseN2kPGN129039(N2kMsg, _MessageID, _Repeat, _UserID, _Latitude, _Longitude, _Accuracy, _RAIM, _Seconds, _COG, _SOG, _Heading, _Unit, _Display, _DSC, _Band, _Msg22, _Mode, _State) ) 
+  {
+     _MessageID = 18;
+    if ( SetAISClassBMessage18(NMEA0183AISMsg, _MessageID, _Repeat, _UserID, _Latitude, _Longitude, _Accuracy, _RAIM, _Seconds, _COG, _SOG, _Heading, _Unit, _Display, _DSC, _Band, _Msg22, _Mode, _State) ) 
+    {
+      push_out_message(NMEA0183AISMsg, FLAG_AIS_N2K_TO_NMEA);
+    }
+  }
+}
+
+void HandleAISClassAStatic(const tN2kMsg &N2kMsg)
+{
+
+  uint8_t _MessageID;
+  tN2kAISRepeat _Repeat;
+  uint32_t _UserID;
+  uint32_t _IMONumber;
+  char _Callsign[8];
+  char _Name[21];
+  uint8_t _VesselType;
+  double _Length;
+  double _Beam;
+  double _PosRefStbd;
+  double _PosRefBow;
+  uint16_t _ETAdate;
+  double _ETAtime;
+  double _Draught;
+  char _Destination[21];
+  tN2kAISVersion _AISversion;
+  tN2kGNSStype _GNSStype;
+  tN2kAISTranceiverInfo _AISinfo;
+  tN2kAISDTE _DTE;
+
+
+  if ( ParseN2kPGN129794(N2kMsg, _MessageID, _Repeat, _UserID, _IMONumber, _Callsign, _Name, _VesselType, _Length, _Beam, _PosRefStbd, _PosRefBow, _ETAdate, _ETAtime, _Draught, _Destination, _AISversion, _GNSStype, _DTE, _AISinfo) ) 
+  {
+    if ( SetAISClassAMessage5(NMEA0183AISMsg, _MessageID, _Repeat, _UserID, _IMONumber, _Callsign, _Name, _VesselType, _Length, _Beam, _PosRefStbd, _PosRefBow, _ETAdate, _ETAtime, _Draught, _Destination, _GNSStype, _DTE ) )
+    {
+      push_out_message( NMEA0183AISMsg.BuildMsg5Part1(NMEA0183AISMsg), FLAG_AIS_N2K_TO_NMEA );
+      push_out_message( NMEA0183AISMsg.BuildMsg5Part2(NMEA0183AISMsg), FLAG_AIS_N2K_TO_NMEA );
+    }
+  }
+}
+
+void HandleAISClassBStaticPartA(const tN2kMsg &N2kMsg)
+{
+  uint8_t _MessageID;
+  tN2kAISRepeat _Repeat;
+  uint32_t _UserID; 
+  char _Name[21];
+
+  if ( ParseN2kPGN129809 (N2kMsg, _MessageID, _Repeat, _UserID, _Name) )
+  {
+    //tNMEA0183AISMsg NMEA0183AISMsg;
+    //
+    //  This does not send any message, it just stores the mapping of ID to
+    //  ship name in a class vector for later use by a Part B message
+    //
+    SetAISClassBMessage24PartA(NMEA0183AISMsg, _MessageID, _Repeat, _UserID, _Name);
+  }
+}
+
+void HandleAISClassBStaticPartB(const tN2kMsg &N2kMsg)
+{
+  uint8_t _MessageID;
+  tN2kAISRepeat _Repeat;
+  uint32_t _UserID, _MothershipID;
+  char _Callsign[8];
+  char _Vendor[4];
+  uint8_t _VesselType;
+  double _Length;
+  double _Beam;
+  double _PosRefStbd;
+  double _PosRefBow;
+
+  if ( ParseN2kPGN129810(N2kMsg, _MessageID, _Repeat, _UserID, _VesselType, _Vendor, _Callsign, _Length, _Beam, _PosRefStbd, _PosRefBow, _MothershipID) )
+  {
+    if ( SetAISClassBMessage24(NMEA0183AISMsg, _MessageID, _Repeat, _UserID, _VesselType, _Vendor, _Callsign, _Length, _Beam, _PosRefStbd, _PosRefBow, _MothershipID ) )
+    {
+      push_out_message( NMEA0183AISMsg.BuildMsg24PartA(NMEA0183AISMsg), FLAG_AIS_N2K_TO_NMEA );
+      push_out_message( NMEA0183AISMsg.BuildMsg24PartB(NMEA0183AISMsg), FLAG_AIS_N2K_TO_NMEA );
+    }
   }
 }
 
@@ -558,8 +665,6 @@ void n2k_output()
     n2k_hdp        = N2kDoubleNA;
     n2k_altitude   = N2kDoubleNA;
     n2k_fix_geosep = N2kDoubleNA;
-    //n2k_fix_age    = N2kDoubleNA;
-    //n2k_fix_refid  = N2kUInt16NA;
     n2k_fix_valid  = false;
   }
 
@@ -611,12 +716,11 @@ void n2k_output()
       n2k_battery_voltage[i] = N2kDoubleNA;
     }
   }
+
+
   //
   // Output whatever we can as NMEA0183 based on the N2K data at hand
   //
-  
-  //Serial.print("COWABUNGA outputting with n2k_fix_valid as ");
-  //Serial.println(n2k_fix_valid);
   
   tNMEA0183Msg NMEA0183Msg;
   if(n2k_output_cycle == 0 && n2k_fix_valid)
@@ -625,9 +729,7 @@ void n2k_output()
                         1, n2k_siv, n2k_hdp, n2k_altitude - n2k_fix_geosep, 
                         n2k_fix_geosep, NMEA0183DoubleNA, NMEA0183UInt32NA) )
     {
-      //Serial.println("COWABUNGA A");
-      push_out_message(NMEA0183Msg);
-      //Serial.println("COWABUNGA B");
+      push_out_message(NMEA0183Msg, FLAG_GPS_N2K_TO_NMEA);
     }
   }
   else if(n2k_output_cycle == 1 && n2k_fix_valid)
@@ -635,9 +737,7 @@ void n2k_output()
     if ( NMEA0183SetRMC(NMEA0183Msg, n2k_fix_seconds, n2k_latitude, n2k_longitude,
                         n2k_cog, n2k_sog, n2k_fix_days_1970, n2k_variation) )
     {
-      //Serial.println("COWABUNGA C");
-      push_out_message(NMEA0183Msg);
-      //Serial.println("COWABUNGA D");
+      push_out_message(NMEA0183Msg, FLAG_GPS_N2K_TO_NMEA);
     }
   }
   else if(n2k_output_cycle == 2)
@@ -646,19 +746,19 @@ void n2k_output()
          !N2kIsNA(n2k_variation)        && 
          NMEA0183SetHDG(NMEA0183Msg, n2k_heading_magnetic, n2k_deviation, n2k_variation) )
     {
-      push_out_message(NMEA0183Msg);
+      push_out_message(NMEA0183Msg, FLAG_NAV_N2K_TO_NMEA);
     }
     else
     {
       if ( !N2kIsNA(n2k_heading_true) &&  
            NMEA0183SetHDT(NMEA0183Msg, n2k_heading_true))
       {
-        push_out_message(NMEA0183Msg);
+        push_out_message(NMEA0183Msg, FLAG_NAV_N2K_TO_NMEA);
       }
       if ( !N2kIsNA(n2k_heading_magnetic) && 
            NMEA0183SetHDM(NMEA0183Msg, n2k_heading_magnetic))
       {
-        push_out_message(NMEA0183Msg);
+        push_out_message(NMEA0183Msg, FLAG_NAV_N2K_TO_NMEA);
       }
     } 
   }
@@ -666,11 +766,11 @@ void n2k_output()
   {
     if ( !N2kIsNA(n2k_depth) && NMEA0183SetDPT(NMEA0183Msg, n2k_depth, n2k_offset) )
     {
-      push_out_message(NMEA0183Msg);
+      push_out_message(NMEA0183Msg, FLAG_DEP_N2K_TO_NMEA);
     }
     if ( !N2kIsNA(n2k_depth) && NMEA0183SetDBx(NMEA0183Msg, n2k_depth, n2k_offset) )
     {
-      push_out_message(NMEA0183Msg);
+      push_out_message(NMEA0183Msg, FLAG_DEP_N2K_TO_NMEA);
     }
   }
   else if(n2k_output_cycle == 4)
@@ -679,18 +779,18 @@ void n2k_output()
          !N2kIsNA(n2k_heading_magnetic) && 
          NMEA0183SetVHW(NMEA0183Msg, n2k_heading_true, n2k_heading_magnetic, n2k_stw ) )
     {
-      push_out_message(NMEA0183Msg);
+      push_out_message(NMEA0183Msg, FLAG_NAV_N2K_TO_NMEA);
     }
   }
   else if(n2k_output_cycle == 5)
   {
     if ( !N2kIsNA(n2k_wind_true_speed) && NMEA0183SetMWV(NMEA0183Msg, RadToDeg(n2k_wind_true_direction), NMEA0183Wind_True, n2k_wind_true_speed) )
     {
-      push_out_message(NMEA0183Msg);
+      push_out_message(NMEA0183Msg, FLAG_WIN_N2K_TO_NMEA);
     }
     if ( !N2kIsNA(n2k_wind_apparent_speed) && NMEA0183SetMWV(NMEA0183Msg, RadToDeg(n2k_wind_apparent_direction), NMEA0183Wind_Apparent, n2k_wind_apparent_speed) )
     {
-      push_out_message(NMEA0183Msg);
+      push_out_message(NMEA0183Msg, FLAG_WIN_N2K_TO_NMEA);
     }
   }
   else if(n2k_output_cycle == 6)
@@ -707,7 +807,7 @@ void n2k_output()
             NMEA0183Msg.AddDoubleField(n2k_water_temperature -  273.15, 1,tNMEA0183Msg::DefDoubleFormat,"C")
           )
        {
-         push_out_message(NMEA0183Msg);
+         push_out_message(NMEA0183Msg, FLAG_ENV_N2K_TO_NMEA);
        }
     }
   }
@@ -721,131 +821,15 @@ void n2k_output()
 
 void append_n2k_gps_data_to_string(String &the_string)
 {
-    if( !N2kIsNA(n2k_latitude) )
-    {
-      the_string += F(",L:");
-      memset(temp_string, 0, 20 * sizeof(char));
-      dtostrf(n2k_latitude,4,7,temp_string);
-      the_string += temp_string;
-    }
-    
-    
-    if( !N2kIsNA(n2k_longitude) )
-    {
-      the_string += F(",O:");
-      memset(temp_string, 0, 20 * sizeof(char));
-      dtostrf(n2k_longitude,4,7,temp_string);
-      the_string += temp_string;
-    }
-    
-    if ( !N2kIsNA(n2k_sog) )
-    {
-      the_string += F(",S:");
-      memset(temp_string, 0, 20 * sizeof(char));
-      dtostrf(msToKnots(n2k_sog),4,2,temp_string);
-      the_string += temp_string;
-    }
 
-    if ( !N2kIsNA(n2k_cog) )
-    {
-      the_string += F(",B:");
-      memset(temp_string, 0, 20 * sizeof(char));
-      dtostrf(RadToDeg(n2k_cog),4,2,temp_string);
-      the_string += temp_string;
-    }
-
-    if ( !N2kIsNA(n2k_altitude) )
-    {
-      the_string += F(",A:");
-      memset(temp_string, 0, 20 * sizeof(char));
-      dtostrf(n2k_altitude - n2k_fix_geosep,3,2,temp_string);
-      the_string += temp_string;
-    }
-
-    if ( !N2kIsNA(n2k_hdp) )
-    {
-      the_string += F(",H:");
-      memset(temp_string, 0, 20 * sizeof(char));
-      dtostrf(n2k_hdp,3,2,temp_string);
-      the_string += temp_string;
-    }
-
-    if ( !N2kIsNA(n2k_siv) )
-    {
-      the_string += F(",N:");
-      the_string += n2k_siv;
-    }
-    else
-    {
-      the_string += F(",N:0");
-    }
-
-    if ( !N2kIsNA(n2k_heading_magnetic) )
-    {
-      the_string += F(",M:");
-      memset(temp_string, 0, 20 * sizeof(char));
-      dtostrf(RadToDeg(n2k_heading_magnetic),4,2,temp_string);
-      the_string += temp_string;
-    }
-    if ( !N2kIsNA(n2k_heading_true) )
-    {
-      the_string += F(",G:");
-      memset(temp_string, 0, 20 * sizeof(char));
-      dtostrf(RadToDeg(n2k_heading_true),4,2,temp_string);
-      the_string += temp_string;
-    }
-    if ( !N2kIsNA(n2k_depth) )
-    {
-      the_string += F(",D:");
-      memset(temp_string, 0, 20 * sizeof(char));
-      dtostrf(n2k_depth,4,2,temp_string);
-      the_string += temp_string;
-    }
-    if ( !N2kIsNA(n2k_stw) )
-    {
-      the_string += F(",R:");
-      memset(temp_string, 0, 20 * sizeof(char));
-      dtostrf(msToKnots(n2k_stw),4,2,temp_string);
-      the_string += temp_string;
-    }
-    if ( !N2kIsNA(n2k_water_temperature) )
-    {
-      the_string += F(",Y:");
-      memset(temp_string, 0, 20 * sizeof(char));
-      dtostrf(KelvinToF(n2k_water_temperature),4,2,temp_string);
-      the_string += temp_string;
-    }
-/*
-    if ( !N2kIsNA(n2k_wind_true_speed) )
-    {
-      the_string += F(",W:");
-      memset(temp_string, 0, 20 * sizeof(char));
-      dtostrf(n2k_wind_true_speed,4,2,temp_string);
-      the_string += temp_string;
-    }
-    if ( !N2kIsNA(n2k_wind_true_direction) )
-    {
-      the_string += F(",X:");
-      memset(temp_string, 0, 20 * sizeof(char));
-      dtostrf(RadToDeg(n2k_wind_true_direction),4,2,temp_string);
-      the_string += temp_string;
-    }
-    if ( !N2kIsNA(n2k_wind_apparent_speed) )
-    {
-      the_string += F(",J:");
-      memset(temp_string, 0, 20 * sizeof(char));
-      dtostrf(n2k_wind_apparent_speed,4,2,temp_string);
-      the_string += temp_string;
-    }
-    if ( !N2kIsNA(n2k_wind_apparent_direction) )
-    {
-      the_string += F(",K:");
-      memset(temp_string, 0, 20 * sizeof(char));
-      dtostrf(RadToDeg(n2k_wind_apparent_direction),4,2,temp_string);
-      the_string += temp_string;
-    }
     for(i=0; i < MAX_N2K_BATTERIES; i++)
     {
+      Serial.print("Battery map ");
+      Serial.print(i);
+      Serial.print(": ");
+      Serial.print(n2k_battery_map[i]);
+      Serial.print("-->");
+      Serial.println(n2k_battery_voltage[i]);
       if(n2k_battery_map[i] != 254 && !N2kIsNA(n2k_battery_voltage[i]))
       {
         the_string += F(",E");
@@ -858,9 +842,15 @@ void append_n2k_gps_data_to_string(String &the_string)
         the_string += temp_string;
       }
     }
-*/
+
 }
 
 
+void possibly_convert_nmea_sentence(String nmea0183_sentence)
+{
+  Serial.print("COWABUNGA: I should be converting "); Serial.println(nmea0183_sentence);
+}
+
 
 #endif
+

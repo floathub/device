@@ -122,4 +122,18 @@ With the following changes:
 		#define SERIAL7_RX_BUFFER_SIZE     256
 
 
-        
+
+
+Acknowledgements
+----------------        
+
+This code is built on top of the entire Arduino and Teensy ecosystem, none
+of which would be possible without all of the many contributors to those
+projects (including several Adafruit Libraries). 
+
+The N2K Code depends entirely on the NMEA-2000 and related NMEA-0183
+libraries from Timo Lappalainen (https://github.com/ttlappalainen/NMEA2000). 
+
+Encoding of AIS messages into 0183 format depends on the NMEA0183 AIS
+library from Ronnie Zeiller (https://github.com/ronzeiller/NMEA0183-AIS).
+
