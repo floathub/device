@@ -130,8 +130,8 @@
 
 #ifdef N2K_CODE_ON
 #include "n2k.h"
-const unsigned long TransmitMessages[] PROGMEM={0};
-const unsigned long ReceiveMessages[] PROGMEM={127250UL,127258UL,128259UL,128267UL,129025UL,129026L,129029L,129038L,129039L,129794L,129809L,129810L,130306L,130310L,0};
+const unsigned long TransmitMessages[] PROGMEM={129029UL,0};
+const unsigned long ReceiveMessages[] PROGMEM={127250UL,127258UL,128259UL,128267UL,129025UL,129026UL,129029UL,129038UL,129039UL,129794UL,129809UL,129810UL,130306UL,130310UL,0};
 #include <NMEA2000_CAN.h>  
 #endif
 
@@ -833,7 +833,6 @@ int my_compare_function (const void * arg1, const void * arg2)
 
 void parse_gps_buffer_as_rmc()
 {
-
   int time_start = 6;
   int time_break = gps_read_buffer.indexOf('.', time_start + 1);
   int status_start = gps_read_buffer.indexOf(',', time_start + 1);
@@ -855,7 +854,6 @@ void parse_gps_buffer_as_rmc()
     time_break = status_start;
   }
 
-  
   if( time_start < 0    ||    time_start >= (int) gps_read_buffer.length()    ||
       time_break < 0    ||    time_break >= (int) gps_read_buffer.length()    ||
       status_start < 0  ||    status_start >= (int) gps_read_buffer.length()  ||
@@ -908,7 +906,7 @@ void parse_gps_buffer_as_rmc()
       return;
   }
       
-     
+
   String is_valid = gps_read_buffer.substring(status_start + 1, lat_start);
   
   /*
@@ -943,7 +941,7 @@ void parse_gps_buffer_as_rmc()
   memset(temp_string, 0, 20 * sizeof(char));
   gps_utc.substring(10,14).toCharArray(temp_string, 5);
   int  gps_time_year = atoi(temp_string);
-  
+
   /*
     As long as the year is "reasonable", assume we have something close to right time
   */
@@ -976,7 +974,6 @@ void parse_gps_buffer_as_rmc()
   //  Use running average of GPS positions to see if we are moving (active)
   //
  
-
   if(gps_valid)
   {
     if(tmg_start > sog_start + 1)
@@ -1004,13 +1001,18 @@ void parse_gps_buffer_as_rmc()
     // median of 5 most recent values (minimal outlier filter)
     //
 
-    memset(temp_string, 0, 20 * sizeof(char));
-    gps_sog.substring(0,gps_sog.length()).toCharArray(temp_string, 19);
-    float_one = atof(temp_string);
+    float_one = 0.0;
+    if( gps_sog.length() > 0)
+    { 
+      memset(temp_string, 0, 20 * sizeof(char));
+      gps_sog.substring(0,gps_sog.length()).toCharArray(temp_string, 19);
+      float_one = atof(temp_string);
+    }
     
     //
     // Add current observation to the speed vector and make a copy
     //
+
     float sorted_vector[OUTLIER_VECTOR_SIZE];
     for(i=0; i< OUTLIER_VECTOR_SIZE - 1 ; i++)
     {
@@ -1052,7 +1054,6 @@ void parse_gps_buffer_as_rmc()
     #endif
     currently_active = false;
   }
- 
 }
 
 
@@ -1324,6 +1325,7 @@ void gps_read()
               push_out_nmea_sentence(false);
               parse_gps_buffer_as_rmc(); 
             #ifdef N2K_CODE_ON
+              possibly_convert_nmea_sentence(gps_read_buffer.c_str());
             }
             #endif
 	  }
@@ -1347,6 +1349,7 @@ void gps_read()
               push_out_nmea_sentence(false);  
               parse_gps_buffer_as_gga();  
             #ifdef N2K_CODE_ON
+              possibly_convert_nmea_sentence(gps_read_buffer.c_str());
             }
             #endif
 	  }
@@ -2277,7 +2280,7 @@ void update_nmea()
          push_out_nmea_sentence(true);
          parse_nmea_sentence();
          #ifdef N2K_CODE_ON
-         possibly_convert_nmea_sentence(nmea_read_buffer);
+         possibly_convert_nmea_sentence(nmea_read_buffer.c_str());
          #endif
        }
        nmea_read_buffer = "";
@@ -2317,7 +2320,7 @@ void update_hsnmea()
         push_hsnmea_only_to_esp8266();   
         parse_hsnmea_sentence();
         #ifdef N2K_CODE_ON
-        possibly_convert_nmea_sentence(hsnmea_read_buffer);
+        possibly_convert_nmea_sentence(hsnmea_read_buffer.c_str());
         #endif
       }
       #ifdef SOFTSERIAL_DEBUG_ON
@@ -2786,16 +2789,12 @@ void loop()
     //n2k_read();
   } 
 
-
-
-
   if(current_timestamp - n2k_output_previous_timestamp >  n2k_output_interval)
   {
     n2k_output_previous_timestamp = current_timestamp;
     n2k_output();
     //n2k_read();
   } 
-
 
   #endif
 

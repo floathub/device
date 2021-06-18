@@ -76,27 +76,27 @@ void n2k_setup()
   // Default flags (this will get overwritten fairly quickly by the ESP)
   //
 
-  FLAG_GPS_N2K_TO_NMEA = true;
-  FLAG_GPS_NMEA_TO_N2K = true;
+  FLAG_GPS_N2K_TO_NMEA = false;
+  FLAG_GPS_NMEA_TO_N2K = false;
 
-  FLAG_ENV_INT_TO_N2K = true;
-  FLAG_ENV_INT_TO_NMEA = true;
-  FLAG_ENV_N2K_TO_NMEA = true;
-  FLAG_ENV_NMEA_TO_N2K = true;
+  FLAG_ENV_INT_TO_N2K = false;
+  FLAG_ENV_INT_TO_NMEA = false;
+  FLAG_ENV_N2K_TO_NMEA = false;
+  FLAG_ENV_NMEA_TO_N2K = false;
 
-  FLAG_VOL_INT_TO_N2K = true;
+  FLAG_VOL_INT_TO_N2K = false;
 
-  FLAG_NAV_N2K_TO_NMEA = true;
-  FLAG_NAV_NMEA_TO_N2K = true;
+  FLAG_NAV_N2K_TO_NMEA = false;
+  FLAG_NAV_NMEA_TO_N2K = false;
 
-  FLAG_DEP_N2K_TO_NMEA = true;
-  FLAG_DEP_NMEA_TO_N2K = true;
+  FLAG_DEP_N2K_TO_NMEA = false;
+  FLAG_DEP_NMEA_TO_N2K = false;
 
-  FLAG_WIN_N2K_TO_NMEA = true;
-  FLAG_WIN_NMEA_TO_N2K = true;
+  FLAG_WIN_N2K_TO_NMEA = false;
+  FLAG_WIN_NMEA_TO_N2K = false;
 
-  FLAG_AIS_N2K_TO_NMEA = true;
-  FLAG_AIS_NMEA_TO_N2K = true;
+  FLAG_AIS_N2K_TO_NMEA = false;
+  FLAG_AIS_NMEA_TO_N2K = false;
 
   
   //
@@ -115,6 +115,7 @@ void n2k_setup()
   snprintf(serial_number_chars,32,"%lu",(long unsigned int)serial_number);
 
   // Product Info
+
   NMEA2000.SetProductInformation(serial_number_chars, // Manufacturer's Model serial code
                                  120, // Manufacturer's product code
                                  "FloatHub N2K",  // Manufacturer's Model ID
@@ -136,6 +137,7 @@ void n2k_setup()
   NMEA2000.ExtendTransmitMessages(TransmitMessages);
   NMEA2000.ExtendReceiveMessages(ReceiveMessages);
   NMEA2000.SetMsgHandler(HandleNMEA2000Messages);
+
 
   NMEA2000.Open();
 
@@ -165,7 +167,6 @@ void HandleNMEA2000Messages(const tN2kMsg &N2kMsg)
     case 129794UL: HandleAISClassAStatic(N2kMsg); break;
     case 129809UL: HandleAISClassBStaticPartA(N2kMsg); break;
     case 129810UL: HandleAISClassBStaticPartB(N2kMsg); break;
-
   }
 }
 
@@ -218,13 +219,6 @@ void HandleHeading(const tN2kMsg &N2kMsg)
       }
     }
   }
-
-/*
-  if(ParseN2kPGN127250(N2kMsg, n2k_latitude, n2k_longitude)) 
-  {
-    n2k_location_timestamp=millis();
-  }
-*/
 }
 
 
@@ -319,18 +313,19 @@ void HandleGNSS(const tN2kMsg &N2kMsg)
     
     if(unix_time > 1609459199UL && GNSSmethod > 0 && GNSSmethod < 6)
     {
-      n2k_fix_valid = true;
-      n2k_fix_timestamp = millis();
+      n2k_fix_valid          = true;
+      n2k_location_timestamp = millis();
+      n2k_fix_timestamp      = millis();
       setTime(unix_time);
     }
     else
     {
-      n2k_hdp        = N2kDoubleNA;
-      n2k_altitude   = N2kDoubleNA;
-      n2k_fix_geosep = N2kDoubleNA;
-      n2k_fix_timestamp = 0;
-      n2k_fix_valid = false;
-      
+      n2k_hdp                = N2kDoubleNA;
+      n2k_altitude           = N2kDoubleNA;
+      n2k_fix_geosep         = N2kDoubleNA;
+      n2k_location_timestamp = 0;
+      n2k_fix_timestamp      = 0;
+      n2k_fix_valid          = false;
     }
   }
 
@@ -499,7 +494,6 @@ void push_out_message(const tNMEA0183Msg &NMEA0183Msg, bool send_to_nmea_flag = 
     parse_nmea_sentence();
     nmea_read_buffer = a_string; 
   }
-
 }
 
 
@@ -725,21 +719,25 @@ void n2k_output()
   tNMEA0183Msg NMEA0183Msg;
   if(n2k_output_cycle == 0 && n2k_fix_valid)
   {
+
     if ( NMEA0183SetGGA(NMEA0183Msg, n2k_fix_seconds, n2k_latitude, n2k_longitude,
                         1, n2k_siv, n2k_hdp, n2k_altitude - n2k_fix_geosep, 
                         n2k_fix_geosep, NMEA0183DoubleNA, NMEA0183UInt32NA) )
     {
       push_out_message(NMEA0183Msg, FLAG_GPS_N2K_TO_NMEA);
     }
+
   }
+
   else if(n2k_output_cycle == 1 && n2k_fix_valid)
   {
     if ( NMEA0183SetRMC(NMEA0183Msg, n2k_fix_seconds, n2k_latitude, n2k_longitude,
                         n2k_cog, n2k_sog, n2k_fix_days_1970, n2k_variation) )
     {
-      push_out_message(NMEA0183Msg, FLAG_GPS_N2K_TO_NMEA);
+      push_out_message(NMEA0183Msg, FLAG_GPS_N2K_TO_NMEA); 
     }
   }
+
   else if(n2k_output_cycle == 2)
   {
     if ( !N2kIsNA(n2k_heading_magnetic) && 
@@ -846,10 +844,100 @@ void append_n2k_gps_data_to_string(String &the_string)
 }
 
 
-void possibly_convert_nmea_sentence(String nmea0183_sentence)
+
+/*
+***************************************************************************
+*
+* Everything below here is related to converting NMEA0183 message to N2K,
+* which is fairly limited but functional (and is mostly copied from Timo
+* Lappalainen's examples).
+*
+***************************************************************************
+*/
+
+struct tBoatData {
+  unsigned long DaysSince1970;   // Days since 1970-01-01
+  
+  double TrueHeading,SOG,COG,Variation,
+         GPSTime,// Secs since midnight,
+         Latitude, Longitude, Altitude, HDOP, GeoidalSeparation, DGPSAge;
+  int GPSQualityIndicator, SatelliteCount, DGPSReferenceStationID;
+  bool MOBActivated;
+
+public:
+  tBoatData() {
+    TrueHeading=0;
+    SOG=0;
+    COG=0; 
+    Variation=7.0;
+    GPSTime=0;
+    Altitude=0;
+    HDOP=100000;
+    DGPSAge=100000;
+    DaysSince1970=0; 
+    MOBActivated=false; 
+    SatelliteCount=0; 
+    DGPSReferenceStationID=0;
+  };
+};
+
+tBoatData BoatData;
+
+tN2kGNSSmethod GNSMethofNMEA0183ToN2k(int Method)
 {
-  Serial.print("COWABUNGA: I should be converting "); Serial.println(nmea0183_sentence);
+  switch (Method) {
+    case 0: return N2kGNSSm_noGNSS;
+    case 1: return N2kGNSSm_GNSSfix;
+    case 2: return N2kGNSSm_DGNSS;
+    default: return N2kGNSSm_noGNSS;  
+  }
 }
+
+
+
+void convertGGA(tNMEA0183Msg nmea_message)
+{
+  if (NMEA0183ParseGGA_nc(nmea_message,BoatData.GPSTime,BoatData.Latitude,BoatData.Longitude,
+                   BoatData.GPSQualityIndicator,BoatData.SatelliteCount,BoatData.HDOP,BoatData.Altitude,BoatData.GeoidalSeparation,
+                   BoatData.DGPSAge,BoatData.DGPSReferenceStationID))
+  {
+    tN2kMsg N2kMsg;
+    SetN2kGNSS(N2kMsg,1,BoatData.DaysSince1970,BoatData.GPSTime,BoatData.Latitude,BoatData.Longitude,BoatData.Altitude,
+               N2kGNSSt_GPS,GNSMethofNMEA0183ToN2k(BoatData.GPSQualityIndicator),BoatData.SatelliteCount,BoatData.HDOP,0,
+               BoatData.GeoidalSeparation,1,N2kGNSSt_GPS,BoatData.DGPSReferenceStationID,BoatData.DGPSAge);
+    
+    NMEA2000.SendMsg(N2kMsg);
+  }
+}
+
+void convertRMC(tNMEA0183Msg nmea_message)
+{
+  NMEA0183ParseRMC_nc(nmea_message, BoatData.GPSTime, BoatData.Latitude, BoatData.Longitude, BoatData.COG, BoatData.SOG, BoatData.DaysSince1970, BoatData.Variation);
+}
+
+
+void possibly_convert_nmea_sentence(const char* nmea0183_sentence)
+{
+  Serial.println("COWABUNGA: I should be possibly converting ...");
+/*
+  tNMEA0183Msg nmea_message;
+  if(! nmea_message.SetMessage(nmea0183_sentence))
+  {
+    return; // Some kind of bad data?
+  }
+  //if(FLAG_GPS_NMEA_TO_N2K && nmea_message.IsMessageCode("GGA"))
+  if(nmea_message.IsMessageCode("GGA"))
+  {
+    convertGGA(nmea_message);
+  }
+  else if (nmea_message.IsMessageCode("RMC"))
+  {
+    convertRMC(nmea_message);
+  }
+*/
+}
+
+
 
 
 #endif
