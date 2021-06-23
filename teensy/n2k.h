@@ -6,10 +6,14 @@
   NMEA2000 Library from Timo Lappalainen & Kave Oy <www.kave.fi>
   
   Also owes a great deal to their NMEA0183 library as well.
+  
+  And Ronnie Zeiller's NMEA-0183-AIS encoder
+  (https://github.com/ronzeiller/NMEA0183-AIS)
+  
+  And KimBP's binary AIS decoder (https://github.com/KimBP/AIS)
 
 */
 
-// #include <NMEA2000_CAN.h>  // This will automatically choose right CAN library and create suitable NMEA2000 object
 #include <NMEA0183.h>
 #include <NMEA2000.h>
 #include <NMEA0183AISMessages.h>
@@ -102,6 +106,12 @@ unsigned long  n2k_battery_timestamp[MAX_N2K_BATTERIES];
 tNMEA0183AISMsg NMEA0183AISMsg;
 
 //
+//  And a fairly pointless sequence counter
+//
+
+char sequence_id;
+
+//
 //  Conversion flags
 //
 
@@ -126,6 +136,15 @@ bool FLAG_WIN_NMEA_TO_N2K;
 
 bool FLAG_AIS_N2K_TO_NMEA;
 bool FLAG_AIS_NMEA_TO_N2K;
+
+
+//
+//  A place to store first half of multi-fragment AIS messages
+//
+
+uint previous_ais_message_sequence_id;
+char previous_ais_message_ascii_encoded_bitstream[128];
+
 
 #endif
 

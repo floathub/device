@@ -4,6 +4,7 @@
 //#include "globals.h"
 #include <N2kMessages.h>
 #include <NMEA0183Messages.h>
+#include <AIS.h>
 //#include <NMEA0183Msg.h>
 //#include <math.h>
 
@@ -14,7 +15,8 @@
 
 void n2k_setup()
 {
-
+  sequence_id = 0;
+  
   n2k_latitude  = N2kDoubleNA;
   n2k_longitude = N2kDoubleNA;
   n2k_gps_valid = false;
@@ -143,7 +145,15 @@ void n2k_setup()
 
 }
 
-
+char next_sequence_id()
+{
+  sequence_id += 1;
+  if( sequence_id >= 253)
+  {
+    sequence_id = 0;
+  }
+  return sequence_id;
+}
 
 void HandleNMEA2000Messages(const tN2kMsg &N2kMsg)
 {
@@ -766,7 +776,7 @@ void n2k_output()
     {
       push_out_message(NMEA0183Msg, FLAG_DEP_N2K_TO_NMEA);
     }
-    if ( !N2kIsNA(n2k_depth) && NMEA0183SetDBx(NMEA0183Msg, n2k_depth, n2k_offset) )
+    if ( !N2kIsNA(n2k_depth) && NMEA0183SetDBT(NMEA0183Msg, n2k_depth) )
     {
       push_out_message(NMEA0183Msg, FLAG_DEP_N2K_TO_NMEA);
     }
@@ -858,7 +868,7 @@ void append_n2k_gps_data_to_string(String &the_string)
 struct tBoatData {
   unsigned long DaysSince1970;   // Days since 1970-01-01
   
-  double TrueHeading,SOG,COG,Variation,
+  double TrueHeading,SOG,COG,Variation,Deviation,Depth,Offset,
          GPSTime,// Secs since midnight,
          Latitude, Longitude, Altitude, HDOP, GeoidalSeparation, DGPSAge;
   int GPSQualityIndicator, SatelliteCount, DGPSReferenceStationID;
@@ -869,7 +879,8 @@ public:
     TrueHeading=0;
     SOG=0;
     COG=0; 
-    Variation=7.0;
+    Variation=0.0;
+    Deviation=0.0;
     GPSTime=0;
     Altitude=0;
     HDOP=100000;
@@ -902,7 +913,7 @@ void convertGGA(tNMEA0183Msg nmea_message)
                    BoatData.DGPSAge,BoatData.DGPSReferenceStationID))
   {
     tN2kMsg N2kMsg;
-    SetN2kGNSS(N2kMsg,1,BoatData.DaysSince1970,BoatData.GPSTime,BoatData.Latitude,BoatData.Longitude,BoatData.Altitude,
+    SetN2kGNSS(N2kMsg, next_sequence_id(), BoatData.DaysSince1970,BoatData.GPSTime,BoatData.Latitude,BoatData.Longitude,BoatData.Altitude,
                N2kGNSSt_GPS,GNSMethofNMEA0183ToN2k(BoatData.GPSQualityIndicator),BoatData.SatelliteCount,BoatData.HDOP,0,
                BoatData.GeoidalSeparation,1,N2kGNSSt_GPS,BoatData.DGPSReferenceStationID,BoatData.DGPSAge);
     
@@ -915,17 +926,253 @@ void convertRMC(tNMEA0183Msg nmea_message)
   NMEA0183ParseRMC_nc(nmea_message, BoatData.GPSTime, BoatData.Latitude, BoatData.Longitude, BoatData.COG, BoatData.SOG, BoatData.DaysSince1970, BoatData.Variation);
 }
 
+void convertMTW(tNMEA0183Msg nmea_message)
+{
+  //
+  // Have to custom parse this as the library does not include an MTW parser
+  //
+  
+  float water_temp_in_celcius = atof(nmea_message.Field(0));
+  
+  tN2kMsg N2kMsg;
+  SetN2kPGN130310(N2kMsg, next_sequence_id(), CToKelvin(water_temp_in_celcius), CToKelvin(temperature), pressure * 3386.0);
+  NMEA2000.SendMsg(N2kMsg);
+}
+
+void convertHDG(tNMEA0183Msg nmea_message)
+{
+  //
+  // Have to custom parse this as the library does not include an HDG parser
+  //
+  
+  float heading_magnetic = atof(nmea_message.Field(0));
+  float deviation = atof(nmea_message.Field(1));
+  float variation = atof(nmea_message.Field(3));
+  
+  if(nmea_message.Field(2)[0] == 'W')
+    deviation = deviation * -1.0;
+
+  if(nmea_message.Field(4)[0] == 'W')
+    variation = variation * -1.0;
+    
+  BoatData.Deviation = DegToRad(deviation);
+  BoatData.Variation = DegToRad(variation);
+  // float heading_true = heading_magnetic + deviation + variation; 
+    
+  tN2kMsg N2kMsg;
+  SetN2kMagneticHeading(N2kMsg, next_sequence_id(), DegToRad(heading_magnetic), DegToRad(deviation),  DegToRad(variation));  
+  NMEA2000.SendMsg(N2kMsg);
+}
+
+void convertHDM(tNMEA0183Msg nmea_message)
+{
+
+  double heading_magnetic;
+
+  if (NMEA0183ParseHDM_nc(nmea_message, heading_magnetic))
+  {
+    tN2kMsg N2kMsg;
+    SetN2kMagneticHeading(N2kMsg, next_sequence_id(), heading_magnetic, BoatData.Deviation,  BoatData.Variation);  
+    NMEA2000.SendMsg(N2kMsg);
+  }
+}
+
+void convertHDT(tNMEA0183Msg nmea_message)
+{
+  if (NMEA0183ParseHDT_nc(nmea_message, BoatData.TrueHeading))
+  {
+    tN2kMsg N2kMsg;
+    SetN2kPGN127250(N2kMsg, next_sequence_id(), BoatData.TrueHeading, BoatData.Deviation,  BoatData.Variation, N2khr_true);  
+    NMEA2000.SendMsg(N2kMsg);
+  }
+}
+
+void convertVHW(tNMEA0183Msg nmea_message)
+{
+  double heading_magnetic;
+
+  if (NMEA0183ParseVHW_nc(nmea_message, BoatData.TrueHeading, heading_magnetic, BoatData.SOG))
+  {
+    tN2kMsg N2kMsg;
+    SetN2kBoatSpeed(N2kMsg, next_sequence_id(), BoatData.SOG);
+    NMEA2000.SendMsg(N2kMsg);
+  }
+}
+
+void convertDBT(tNMEA0183Msg nmea_message)
+{
+  BoatData.Depth = atof(nmea_message.Field(2));
+  tN2kMsg N2kMsg;
+  SetN2kWaterDepth(N2kMsg, next_sequence_id(), BoatData.Depth, BoatData.Offset);
+  NMEA2000.SendMsg(N2kMsg);
+}
+
+void convertDPT(tNMEA0183Msg nmea_message)
+{
+  BoatData.Depth = atof(nmea_message.Field(0));
+  BoatData.Offset = atof(nmea_message.Field(1));
+  tN2kMsg N2kMsg;
+  SetN2kWaterDepth(N2kMsg, next_sequence_id(), BoatData.Depth, BoatData.Offset);
+  NMEA2000.SendMsg(N2kMsg);
+}
+
+void convertMWV(tNMEA0183Msg nmea_message)
+{
+  double wind_angle, wind_speed;
+  tNMEA0183WindReference wind_reference;
+  tN2kWindReference n2k_wind_reference = N2kWind_True_boat;
+  if(NMEA0183ParseMWV_nc(nmea_message, wind_angle, wind_reference, wind_speed))
+  {
+  
+    if(wind_reference == NMEA0183Wind_Apparent)
+    {
+      n2k_wind_reference = N2kWind_Apparent;
+    }
+    
+    tN2kMsg N2kMsg;
+    SetN2kPGN130306(N2kMsg, next_sequence_id(), wind_speed, wind_angle, n2k_wind_reference);
+    NMEA2000.SendMsg(N2kMsg);
+  }
+}
+
+void convertVDO(tNMEA0183Msg nmea_message)
+{
+
+  //
+  // This is a little more complicated for a couple of reasons:
+  //
+  //	1.  The main NMEA0183 Library does not decode the VDM binary
+  //	payload, so we have to use an additional library.
+  //
+  //	2.  VDM messages can be multipart, and we can't exactly run a huge
+  //	in memory Redis store to keep previous messages around in order to
+  //	match them up.  We just store the *most* recent, and if it does not
+  //	match up, we give up.
+  //
+  
+  uint8_t fragment_number;
+  uint8_t total_fragments;
+  uint message_sequence_id;
+  char channel;
+  uint bitstream_length = 128;
+  char ascii_encoded_bitstream[128];
+  uint fill_bits;
+  
+  if(NMEA0183ParseVDM_nc(nmea_message, fragment_number, total_fragments, message_sequence_id, channel, bitstream_length, ascii_encoded_bitstream, fill_bits))
+  {
+    if(bitstream_length > 0)
+    {
+      if(total_fragments > 1)
+      {
+        if(fragment_number == 1)
+        {
+          previous_ais_message_sequence_id = message_sequence_id;
+          strncpy(previous_ais_message_ascii_encoded_bitstream, ascii_encoded_bitstream, 64);
+          return;
+        }
+        if(previous_ais_message_sequence_id != message_sequence_id)
+        {
+          return;
+        }
+        char temp_ascii_encoded_bitstream[128];
+        strncpy(temp_ascii_encoded_bitstream, previous_ais_message_ascii_encoded_bitstream, 64);
+        strncat(temp_ascii_encoded_bitstream, ascii_encoded_bitstream, 64);
+        strncpy(ascii_encoded_bitstream, temp_ascii_encoded_bitstream, 128);
+      }
+      
+      AIS ais_msg(ascii_encoded_bitstream, fill_bits);
+      tN2kMsg N2kMsg;
+
+      if(ais_msg.get_numeric_type() == 1 || ais_msg.get_numeric_type() == 2 ||ais_msg.get_numeric_type() == 3)
+      {
+        SetN2kAISClassAPosition(N2kMsg, next_sequence_id(), (tN2kAISRepeat) ais_msg.get_repeat(), ais_msg.get_mmsi(), ais_msg.get_latitude() / 60000.0, ais_msg.get_longitude() /60000.0,
+                        ais_msg.get_posAccuracy_flag(),  ais_msg.get_raim_flag(), ais_msg.get_timeStamp(), DegToRad(ais_msg.get_COG() / 10.0), ais_msg.get_SOG() / 10.0, 
+                        DegToRad(ais_msg.get_HDG() / 10.0), ais_msg.get_rot(), (tN2kAISNavStatus) ais_msg.get_navStatus());
+        NMEA2000.SendMsg(N2kMsg);
+      }
+
+      else if (ais_msg.get_numeric_type() == 5)
+      {
+        tmElements_tt tm;
+        tm.Hour = ais_msg.get_hour(); tm.Minute = ais_msg.get_minute(); tm.Second = 0;
+        tm.Day = ais_msg.get_day(); tm.Month = ais_msg.get_month(); tm.Year = year();
+        if(tm.Month < month())
+        {
+          tm.Year += 1;
+        }
+        time_t arrival_eta = makeTime(tm);
+
+        tN2kAISTranceiverInfo transceiver_info = N2kaisti_Channel_A_VDL_reception;
+        if( channel == 'B')
+        {
+          transceiver_info = N2kaisti_Channel_B_VDL_reception;
+        }
+        
+        char call_sign[16];
+        char ship_name[24];
+        char destination[24];
+        strncpy(call_sign, ais_msg.get_callsign(), 15);
+        strncpy(ship_name, ais_msg.get_shipname(), 23);
+        strncpy(destination, ais_msg.get_destination(), 23);
+      
+        SetN2kPGN129794(N2kMsg, next_sequence_id(), (tN2kAISRepeat) ais_msg.get_repeat(), ais_msg.get_mmsi(), 
+                        ais_msg.get_imo(), call_sign, ship_name, ais_msg.get_shiptype(), ais_msg.get_to_bow() + ais_msg.get_to_stern() + 0.0,
+                        ais_msg.get_to_port() + ais_msg.get_to_starboard() + 0.0, ais_msg.get_to_starboard() + 0.0, ais_msg.get_to_bow() + 0.0, 
+                        arrival_eta % 86400, arrival_eta - (arrival_eta % 8600), 
+                        ais_msg.get_draught(), destination, (tN2kAISVersion) ais_msg.get_ais_version(), (tN2kGNSStype) ais_msg.get_epfd(),
+                        (tN2kAISDTE) ais_msg.get_dte_flag(), transceiver_info);
+        NMEA2000.SendMsg(N2kMsg);
+
+      }
+
+      else if (ais_msg.get_numeric_type() == 18)
+      {
+        SetN2kAISClassBPosition(N2kMsg, next_sequence_id(), (tN2kAISRepeat) ais_msg.get_repeat(), ais_msg.get_mmsi(), 
+                        ais_msg.get_latitude() / 60000.0, ais_msg.get_longitude() /60000.0, ais_msg.get_posAccuracy_flag(),  ais_msg.get_raim_flag(), 
+                        ais_msg.get_timeStamp(), DegToRad(ais_msg.get_COG() / 10.0), ais_msg.get_SOG() / 10.0, DegToRad(ais_msg.get_HDG() / 10.0), (tN2kAISUnit) ais_msg.get_cs_flag(),
+                        ais_msg.get_display_flag(), ais_msg.get_dsc_flag(), ais_msg.get_band_flag(), ais_msg.get_msg22_flag(), (tN2kAISMode) 0, 0);
+        NMEA2000.SendMsg(N2kMsg);
+      }                        
+      else if (ais_msg.get_numeric_type() == 24)
+      {
+        if(ais_msg.get_partno() == 0)
+        {
+          char ship_name[24];
+          strncpy(ship_name, ais_msg.get_shipname(), 23);
+          SetN2kPGN129809(N2kMsg, next_sequence_id(), (tN2kAISRepeat) ais_msg.get_repeat(), ais_msg.get_mmsi(), ship_name);
+          NMEA2000.SendMsg(N2kMsg);
+        }
+        else if(ais_msg.get_partno() == 1)
+        {
+        
+          char call_sign[16];
+          char vendor_id[8];
+          strncpy(call_sign, ais_msg.get_callsign(), 15);
+          strncpy(vendor_id, ais_msg.get_vendorid(), 7);
+          SetN2kPGN129810(N2kMsg, next_sequence_id(), (tN2kAISRepeat) ais_msg.get_repeat(), ais_msg.get_mmsi(),
+                          ais_msg.get_shiptype(), vendor_id, call_sign, ais_msg.get_to_bow() + ais_msg.get_to_stern() + 0.0, ais_msg.get_to_port() + ais_msg.get_to_starboard() + 0.0, 
+                          ais_msg.get_to_starboard() + 0.0, ais_msg.get_to_bow() + 0.0, ais_msg.get_mothership_mmsi());
+          NMEA2000.SendMsg(N2kMsg);
+        }
+      }                        
+    }
+  }
+}
+
 
 void possibly_convert_nmea_sentence(const char* nmea0183_sentence)
 {
-  Serial.println("COWABUNGA: I should be possibly converting ...");
-/*
   tNMEA0183Msg nmea_message;
   if(! nmea_message.SetMessage(nmea0183_sentence))
   {
     return; // Some kind of bad data?
   }
+  
   //if(FLAG_GPS_NMEA_TO_N2K && nmea_message.IsMessageCode("GGA"))
+
+  //
+  //  GPS/Location Messages
+  //
   if(nmea_message.IsMessageCode("GGA"))
   {
     convertGGA(nmea_message);
@@ -934,7 +1181,67 @@ void possibly_convert_nmea_sentence(const char* nmea0183_sentence)
   {
     convertRMC(nmea_message);
   }
-*/
+
+  //
+  // Environmental
+  //
+  else if (nmea_message.IsMessageCode("MTW"))
+  {
+    convertMTW(nmea_message);
+  }
+
+  //
+  // Navigation
+  //
+  else if (nmea_message.IsMessageCode("HDG"))
+  {
+    convertHDG(nmea_message);
+  }
+  else if (nmea_message.IsMessageCode("HDM"))
+  {
+    convertHDM(nmea_message);
+  }
+  else if (nmea_message.IsMessageCode("HDT"))
+  {
+    convertHDT(nmea_message);
+  }
+  else if (nmea_message.IsMessageCode("VHW"))
+  {
+    convertVHW(nmea_message);
+  }
+
+  //
+  // Depth
+  //
+  
+  else if (nmea_message.IsMessageCode("DBT"))
+  {
+    convertDBT(nmea_message);
+  }
+
+  else if (nmea_message.IsMessageCode("DPT"))
+  {
+    convertDPT(nmea_message);
+  }
+
+  //
+  // Wind
+  //
+
+  else if (nmea_message.IsMessageCode("MWV"))
+  {
+    convertMWV(nmea_message);
+  }
+  
+  //
+  // AIS
+  //
+
+  else if (nmea_message.IsMessageCode("VDO") || nmea_message.IsMessageCode("VDM"))
+  {
+    convertVDO(nmea_message);
+  }
+
 }
 
 
