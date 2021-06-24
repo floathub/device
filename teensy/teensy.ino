@@ -1072,6 +1072,7 @@ void parse_gps_buffer_as_gga()
   int lat_start =  gps_read_buffer.indexOf(',', time_start + 1);
   int nors_start =  gps_read_buffer.indexOf(',', lat_start + 1);
   int lon_start =  gps_read_buffer.indexOf(',', nors_start + 1);
+  int lon_dot = gps_read_buffer.indexOf('.', lon_start + 1);
   int wore_start = gps_read_buffer.indexOf(',', lon_start + 1);
   int qual_start = gps_read_buffer.indexOf(',', wore_start + 1);
   int siv_start = gps_read_buffer.indexOf(',', qual_start + 1); 
@@ -1089,6 +1090,7 @@ void parse_gps_buffer_as_gga()
       hdp_start < 0  ||   hdp_start >= (int) gps_read_buffer.length()    ||
       alt_start < 0  ||   alt_start >= (int) gps_read_buffer.length()    ||
       altu_start < 0 ||   altu_start >= (int) gps_read_buffer.length()   ||
+      lon_dot < 0    ||   lon_dot <= lon_start + 2                       ||
       gps_read_buffer.lastIndexOf('$') > 0)
   {
       gps_valid = false;
@@ -1126,15 +1128,16 @@ void parse_gps_buffer_as_gga()
     gps_latitude += F("0");
   }
   gps_latitude += gps_read_buffer.substring(nors_start + 1, lon_start);
-
-  gps_longitude  = gps_read_buffer.substring(lon_start + 1, lon_start + 4);
+  
+  gps_longitude  = gps_read_buffer.substring(lon_start + 1, lon_dot - 2 );
   gps_longitude += F(" ");
-  gps_longitude += gps_read_buffer.substring(lon_start + 4, wore_start);
+  gps_longitude += gps_read_buffer.substring(lon_dot - 2, wore_start);
   while(gps_longitude.length() < 12)
   {
     gps_longitude += F("0");
   }
   gps_longitude += gps_read_buffer.substring(wore_start + 1, qual_start);
+
 
   gps_siv  = gps_read_buffer.substring(siv_start + 1, hdp_start);
   gps_hdp  = gps_read_buffer.substring(hdp_start + 1, alt_start);

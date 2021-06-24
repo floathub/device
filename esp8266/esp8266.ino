@@ -567,8 +567,8 @@ void init_eeprom_memory()
 
   EEPROM.write(332, 10); 	// Default stationary reporting interval of 10 minutes
 
-  EEPROM.write(333, 0b00101010); //  Default conversion flags.
-  EEPROM.write(334, 0b11011001); // Bit Conversion (G=GPS, 2=N2K, 1=0183)
+  EEPROM.write(333, 0b11111111); //  Default conversion flags.
+  EEPROM.write(334, 0b11111111); // Bit Conversion (G=GPS, 2=N2K, 1=0183)
                                  //  0	G-2-1
                                  //  1	G-1-2
                                  //  2	E-I-2
@@ -4095,7 +4095,7 @@ void parseInput(String &the_input)
     if (no_errors)
     {
       conversion_flags = new_flags;
-      write_eeprom_memory;
+      write_eeprom_memory();
       help_info("l=" + String(new_flags, BIN));
     }    
     #ifdef INPT_DEBUG_ON
