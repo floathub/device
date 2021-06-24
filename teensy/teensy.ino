@@ -737,8 +737,14 @@ void bhware_read()
 
   
   //
-  // We round robin these to not flood the NMEA out channel with realtively minor info
+  // We round robin these to not flood the NMEA out channel with realtively
+  // minor info, but only if the flag is on (and we are an N2K device)
   //
+
+  #ifdef N2K_CODE_ON
+  if(FLAG_ENV_INT_TO_NMEA)
+  {
+  #endif
 
   //
   //
@@ -761,6 +767,7 @@ void bhware_read()
   //	Now the MDA combined
   //
   //
+  
 
   else if(nmea_cycle == 1)
   {
@@ -804,6 +811,10 @@ void bhware_read()
 
     add_checksum_and_send_nmea_string(a_string);  
   }
+
+  #ifdef N2K_CODE_ON
+  }
+  #endif
 
   nmea_cycle += 1;
   if(nmea_cycle > 3)

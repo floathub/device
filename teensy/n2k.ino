@@ -287,9 +287,8 @@ void HandleCOGSOG(const tN2kMsg &N2kMsg)
 
   if ( ParseN2kCOGSOGRapid(N2kMsg,SID,HeadingReference,n2k_cog,n2k_sog) )
   {
-    n2k_cogsog_timestamp = millis();
-    if ( HeadingReference==N2khr_magnetic && !N2kIsNA(n2k_cog) && !N2kIsNA(n2k_variation))
-    {
+    n2k_cogsog_timestamp = millis(); if ( HeadingReference==N2khr_magnetic
+    && !N2kIsNA(n2k_cog) && !N2kIsNA(n2k_variation)) {
       n2k_cog -= n2k_variation;
     }
     else if (HeadingReference==N2khr_magnetic && N2kIsNA(n2k_variation))
@@ -824,9 +823,73 @@ void n2k_output()
   {
     n2k_output_cycle = 0;
   }
+  
+  //
+  //  One other thing we want to do is push out "internal" data (Battery,
+  //  Ambient, etc.) as N2K if the appropriate flags are turned on
+  //
+  
+  if(FLAG_ENV_INT_TO_N2K && n2k_output_cycle == 0)
+  {
+    tN2kMsg N2kMsg;
+    double water_temperature_to_send = n2k_water_temperature;
+    if(water_temperature_to_send != N2kDoubleNA)
+    {
+      water_temperature_to_send = CToKelvin(n2k_water_temperature);
+    }
+    SetN2kPGN130310(N2kMsg, next_sequence_id(), water_temperature_to_send, FToKelvin(temperature), pressure * 3386.0);
+    NMEA2000.SendMsg(N2kMsg);
+
+  }
+  
+  if(FLAG_VOL_INT_TO_N2K && n2k_output_cycle == 1)
+  {
+    tN2kMsg N2kMsg;
+    
+    char a_sequence_id = next_sequence_id();
+    
+    if(battery_one > 1.0)
+    {
+      SetN2kDCBatStatus(N2kMsg, 1, battery_one, N2kDoubleNA, N2kDoubleNA, a_sequence_id);
+      NMEA2000.SendMsg(N2kMsg);
+    }
+
+    if(battery_two > 1.0)
+    {
+      SetN2kDCBatStatus(N2kMsg, 2, battery_two, N2kDoubleNA, N2kDoubleNA, a_sequence_id);
+      NMEA2000.SendMsg(N2kMsg);
+    }
+
+    if(battery_three > 1.0)
+    {
+      SetN2kDCBatStatus(N2kMsg, 3, battery_three, N2kDoubleNA, N2kDoubleNA, a_sequence_id);
+      NMEA2000.SendMsg(N2kMsg);
+    }
+
+    if(charger_one > 1.0)
+    {
+      SetN2kDCBatStatus(N2kMsg, 4, charger_one, N2kDoubleNA, N2kDoubleNA, a_sequence_id);
+      NMEA2000.SendMsg(N2kMsg);
+    }
+
+    if(charger_two > 1.0)
+    {
+      SetN2kDCBatStatus(N2kMsg, 5, charger_two, N2kDoubleNA, N2kDoubleNA, a_sequence_id);
+      NMEA2000.SendMsg(N2kMsg);
+    }
+
+    if(charger_three > 1.0)
+    {
+      SetN2kDCBatStatus(N2kMsg, 6, charger_three, N2kDoubleNA, N2kDoubleNA, a_sequence_id);
+      NMEA2000.SendMsg(N2kMsg);
+    }
+
+  }
+  
 }
 
 
+/*
 void append_n2k_gps_data_to_string(String &the_string)
 {
 
@@ -852,7 +915,7 @@ void append_n2k_gps_data_to_string(String &the_string)
     }
 
 }
-
+*/
 
 
 /*
@@ -935,7 +998,7 @@ void convertMTW(tNMEA0183Msg nmea_message)
   float water_temp_in_celcius = atof(nmea_message.Field(0));
   
   tN2kMsg N2kMsg;
-  SetN2kPGN130310(N2kMsg, next_sequence_id(), CToKelvin(water_temp_in_celcius), CToKelvin(temperature), pressure * 3386.0);
+  SetN2kPGN130310(N2kMsg, next_sequence_id(), CToKelvin(water_temp_in_celcius), FToKelvin(temperature), pressure * 3386.0);
   NMEA2000.SendMsg(N2kMsg);
 }
 
@@ -1168,16 +1231,15 @@ void possibly_convert_nmea_sentence(const char* nmea0183_sentence)
     return; // Some kind of bad data?
   }
   
-  //if(FLAG_GPS_NMEA_TO_N2K && nmea_message.IsMessageCode("GGA"))
 
   //
   //  GPS/Location Messages
   //
-  if(nmea_message.IsMessageCode("GGA"))
+  if(FLAG_GPS_NMEA_TO_N2K && nmea_message.IsMessageCode("GGA"))
   {
     convertGGA(nmea_message);
   }
-  else if (nmea_message.IsMessageCode("RMC"))
+  else if (FLAG_GPS_NMEA_TO_N2K && nmea_message.IsMessageCode("RMC"))
   {
     convertRMC(nmea_message);
   }
@@ -1185,7 +1247,7 @@ void possibly_convert_nmea_sentence(const char* nmea0183_sentence)
   //
   // Environmental
   //
-  else if (nmea_message.IsMessageCode("MTW"))
+  else if (FLAG_ENV_NMEA_TO_N2K && nmea_message.IsMessageCode("MTW"))
   {
     convertMTW(nmea_message);
   }
@@ -1193,19 +1255,19 @@ void possibly_convert_nmea_sentence(const char* nmea0183_sentence)
   //
   // Navigation
   //
-  else if (nmea_message.IsMessageCode("HDG"))
+  else if (FLAG_NAV_NMEA_TO_N2K && nmea_message.IsMessageCode("HDG"))
   {
     convertHDG(nmea_message);
   }
-  else if (nmea_message.IsMessageCode("HDM"))
+  else if (FLAG_NAV_NMEA_TO_N2K && nmea_message.IsMessageCode("HDM"))
   {
     convertHDM(nmea_message);
   }
-  else if (nmea_message.IsMessageCode("HDT"))
+  else if (FLAG_NAV_NMEA_TO_N2K && nmea_message.IsMessageCode("HDT"))
   {
     convertHDT(nmea_message);
   }
-  else if (nmea_message.IsMessageCode("VHW"))
+  else if (FLAG_NAV_NMEA_TO_N2K && nmea_message.IsMessageCode("VHW"))
   {
     convertVHW(nmea_message);
   }
@@ -1214,12 +1276,12 @@ void possibly_convert_nmea_sentence(const char* nmea0183_sentence)
   // Depth
   //
   
-  else if (nmea_message.IsMessageCode("DBT"))
+  else if (FLAG_DEP_NMEA_TO_N2K && nmea_message.IsMessageCode("DBT"))
   {
     convertDBT(nmea_message);
   }
 
-  else if (nmea_message.IsMessageCode("DPT"))
+  else if (FLAG_DEP_NMEA_TO_N2K && nmea_message.IsMessageCode("DPT"))
   {
     convertDPT(nmea_message);
   }
@@ -1228,7 +1290,7 @@ void possibly_convert_nmea_sentence(const char* nmea0183_sentence)
   // Wind
   //
 
-  else if (nmea_message.IsMessageCode("MWV"))
+  else if (FLAG_WIN_NMEA_TO_N2K && nmea_message.IsMessageCode("MWV"))
   {
     convertMWV(nmea_message);
   }
@@ -1237,7 +1299,7 @@ void possibly_convert_nmea_sentence(const char* nmea0183_sentence)
   // AIS
   //
 
-  else if (nmea_message.IsMessageCode("VDO") || nmea_message.IsMessageCode("VDM"))
+  else if (FLAG_AIS_NMEA_TO_N2K && ( nmea_message.IsMessageCode("VDO") || nmea_message.IsMessageCode("VDM")))
   {
     convertVDO(nmea_message);
   }
