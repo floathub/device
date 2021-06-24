@@ -318,9 +318,11 @@ void HandleGNSS(const tN2kMsg &N2kMsg)
   {
     unsigned long unix_time = ( (unsigned long) n2k_fix_days_1970  * 3600UL * 24UL) + n2k_fix_seconds;
 
+    
+
     // If the UNIX time is some time after 2020, and the GNSSmethod is good, this is all valid 
     
-    if(unix_time > 1609459199UL && GNSSmethod > 0 && GNSSmethod < 6)
+    if(unix_time > 1587614400UL && GNSSmethod > 0 && GNSSmethod < 6)
     {
       n2k_fix_valid          = true;
       n2k_location_timestamp = millis();
@@ -885,7 +887,15 @@ void n2k_output()
     }
 
   }
+
+  //
+  // And push out GPS if we are *not* receiving it over N2K
+  //  
   
+  if(!n2k_fix_valid)
+  {
+  
+  }
 }
 
 

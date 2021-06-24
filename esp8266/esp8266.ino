@@ -3474,6 +3474,10 @@ void parseInput(String &the_input)
   else if(the_input.startsWith("S=") && the_input.length() >= 5) // Minimum FHUB sentence length (?)
   {
     queueMessage(the_input.substring(2));
+    if(virtual_serial_on && virtual_serial_client && virtual_serial_client.connected())
+    {
+      virtual_serial_client.println(the_input.substring(2));
+    }
   }
   #ifdef INPT_DEBUG_ON
   else if(the_input.startsWith("S="))

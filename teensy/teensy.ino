@@ -226,9 +226,6 @@ unsigned long gps_interval = 50;                  	//  Read GPS serial every 1/2
 unsigned long voltage_interval = 5000;            	//  Check batteries/chargers every 5 second
 unsigned long pump_interval = 400;               	//  Check pump state every 400 milliseconds
 unsigned long active_reporting_interval = 30000;  	//  When in use, report data every 30 seconds
-//unsigned long idle_reporting_interval = 10000;   	//  Stress testing during development
-//unsigned long idle_reporting_interval = 600000;   	//  When idle, report data every 10 minutes
-//unsigned long idle_reporting_interval = 30000;   	//  Demoboat only every 30 seconds
 unsigned long console_reporting_interval = 5000;  	//  Report to USB console every 5 seconds  
 unsigned long console_interval = 250;             	//  Check console for input every 250 milliseconds
 unsigned long esp8266_interval = 300;			//  Check for input from esp8266 on Serial 7 3ish times per second 
@@ -1336,7 +1333,10 @@ void gps_read()
               push_out_nmea_sentence(false);
               parse_gps_buffer_as_rmc(); 
             #ifdef N2K_CODE_ON
-              possibly_convert_nmea_sentence(gps_read_buffer.c_str());
+              if(gps_valid)
+              {
+                possibly_convert_nmea_sentence(gps_read_buffer.c_str());
+              }
             }
             #endif
 	  }
@@ -1360,7 +1360,10 @@ void gps_read()
               push_out_nmea_sentence(false);  
               parse_gps_buffer_as_gga();  
             #ifdef N2K_CODE_ON
-              possibly_convert_nmea_sentence(gps_read_buffer.c_str());
+              if(gps_valid)
+              {
+                possibly_convert_nmea_sentence(gps_read_buffer.c_str());
+              }
             }
             #endif
 	  }
