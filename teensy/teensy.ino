@@ -180,7 +180,8 @@ float           speed_vector[OUTLIER_VECTOR_SIZE];
 #define         USER_RESET_FACTORY_TIME 20000	//  Hold down reset pin for 20 seconds to make device factory reset
 #define		MAX_SEND_MESSAGE_FAILURES 5
 //#define		VOLTAGE_DIVIDER 37.213 		//  Use to get from AnalogRead() to voltage estimate
-#define		VOLTAGE_DIVIDER 16.123 		//  Use to get from AnalogRead() to voltage estimate
+//#define		VOLTAGE_DIVIDER 16.123 		//  Use to get from AnalogRead() to voltage estimate
+#define		VOLTAGE_DIVIDER 23.5233 		//  Use to get from AnalogRead() to voltage estimate
 
 
 
@@ -2468,6 +2469,7 @@ void factoryReset()
   digitalWrite(COM_LED_2, LOW);
 
   Serial7.println("FactoryResetNow");
+  delay(2000);
   init_eeprom_memory();
   resetFunc();
 }
@@ -2868,12 +2870,12 @@ void loop()
       if(millis() - user_reset_pin_timestamp > USER_RESET_FACTORY_TIME) 
       {
         factoryReset();
-        Serial.println("Factory reset");
+        //Serial.println("Factory reset");
       }
       else if(millis() - user_reset_pin_timestamp > USER_RESET_REBOOT_TIME) 
       {
         dualReboot();
-        Serial.println("Dual reboot");
+        //Serial.println("Dual reboot");
       }
       //user_reset_pin_timestamp = 0; 
     }

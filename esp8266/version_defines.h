@@ -28,7 +28,7 @@
 //  Global defines
 //
 
-//#define CELLULAR_CODE_ON	
+// #define CELLULAR_CODE_ON	
 #define N2K_CODE_ON 
 
 
@@ -40,9 +40,9 @@
 #define ESP8266_BAUD_RATE 256000
 
 #ifdef CELLULAR_CODE_ON
-#define  FLOATHUB_MODEL_DESCRIPTION "FHC.P9.N3.v2.3.0"
+#define  FLOATHUB_MODEL_DESCRIPTION "FHC.P9.Q1.v2.5.0"
 #else
-#define  FLOATHUB_MODEL_DESCRIPTION "FHW.P9.N3.v2.3.0"
+#define  FLOATHUB_MODEL_DESCRIPTION "FHW.P9.Q1.v2.5.0"
 #endif
 
 //
