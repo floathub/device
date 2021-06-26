@@ -294,7 +294,7 @@ bool currently_active = true;
   Adafruit_BMP085 bhware;
 #endif
 
-#define TEMPERATURE_BIAS 15	//  degrees F that BMP, on average, over reports temperature by
+#define TEMPERATURE_BIAS 13	//  degrees F that BMP, on average, over reports temperature by
 float temperature;
 float pressure;
 float temperature_vector[OUTLIER_VECTOR_SIZE];
