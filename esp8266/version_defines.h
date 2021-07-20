@@ -29,15 +29,15 @@
 //
 
 // #define CELLULAR_CODE_ON	
-#define N2K_CODE_ON 
+// #define N2K_CODE_ON 
+#define ESP8266_BAUD_RATE 115200
+//#define ESP8266_BAUD_RATE 256000
 
 
 
 //  Parameters
 #define MAX_COOKIES 10
 
-//#define ESP8266_BAUD_RATE 115200
-#define ESP8266_BAUD_RATE 256000
 
 #ifdef CELLULAR_CODE_ON
 #define  FLOATHUB_MODEL_DESCRIPTION "FHC.P9.Q1.v2.5.0"

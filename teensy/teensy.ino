@@ -1291,7 +1291,7 @@ bool validate_nmea_buffer(bool hsnmea = false)
       return true;
     }
   }
-  #ifdef SOFTSERIAL_DEBUG_ON
+  #ifdef HSNMEA_DEBUG_ON
   if(hsnmea)
   {
     debug_info(String(F("Bad HSNMEA buffer: ")) + hsnmea_read_buffer + ", Wanted: " + a_string);
@@ -2322,7 +2322,6 @@ void update_nmea()
 
 void update_hsnmea()
 {
-
   bool keep_going = true;
 
   while(Serial6.available() && (int) hsnmea_read_buffer.length() < MAX_NMEA_BUFFER && keep_going == true)
@@ -2332,7 +2331,7 @@ void update_hsnmea()
     {
       if(validate_nmea_buffer(true))
       {
-        #ifdef SOFTSERIAL_DEBUG_ON
+        #ifdef HSNMEA_DEBUG_ON
         debug_info("SoftSer good: " + String(hsnmea_read_buffer));
         #endif
         push_hsnmea_only_to_esp8266();   
@@ -2341,7 +2340,7 @@ void update_hsnmea()
         possibly_convert_nmea_sentence(hsnmea_read_buffer.c_str());
         #endif
       }
-      #ifdef SOFTSERIAL_DEBUG_ON
+      #ifdef HSNMEA_DEBUG_ON
       else
       {
         debug_info("SoftSer full: " + String(hsnmea_read_buffer));
@@ -2361,7 +2360,7 @@ void update_hsnmea()
   }
   if((int) hsnmea_read_buffer.length() >= MAX_NMEA_BUFFER - 1 )
   {
-    #ifdef SOFTSERIAL_DEBUG_ON
+    #ifdef HSNMEA_DEBUG_ON
     debug_info("SoftSer toss: " + String(hsnmea_read_buffer));
     #endif
     

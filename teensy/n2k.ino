@@ -1122,7 +1122,7 @@ void convertVDO(tNMEA0183Msg nmea_message)
   //	match them up.  We just store the *most* recent, and if it does not
   //	match up, we give up.
   //
-  
+
   uint8_t fragment_number;
   uint8_t total_fragments;
   uint message_sequence_id;
@@ -1135,6 +1135,11 @@ void convertVDO(tNMEA0183Msg nmea_message)
   {
     if(bitstream_length > 0)
     {
+      if(bitstream_length >= 128)
+      {
+        bitstream_length = 127;
+      }
+      ascii_encoded_bitstream[bitstream_length] = '\0';
       if(total_fragments > 1)
       {
         if(fragment_number == 1)
@@ -1158,6 +1163,7 @@ void convertVDO(tNMEA0183Msg nmea_message)
 
       if(ais_msg.get_numeric_type() == 1 || ais_msg.get_numeric_type() == 2 ||ais_msg.get_numeric_type() == 3)
       {
+
         SetN2kAISClassAPosition(N2kMsg, next_sequence_id(), (tN2kAISRepeat) ais_msg.get_repeat(), ais_msg.get_mmsi(), ais_msg.get_latitude() / 60000.0, ais_msg.get_longitude() /60000.0,
                         ais_msg.get_posAccuracy_flag(),  ais_msg.get_raim_flag(), ais_msg.get_timeStamp(), DegToRad(ais_msg.get_COG() / 10.0), ais_msg.get_SOG() / 10.0, 
                         DegToRad(ais_msg.get_HDG() / 10.0), ais_msg.get_rot(), (tN2kAISNavStatus) ais_msg.get_navStatus());
@@ -1235,12 +1241,12 @@ void convertVDO(tNMEA0183Msg nmea_message)
 
 void possibly_convert_nmea_sentence(const char* nmea0183_sentence)
 {
+
   tNMEA0183Msg nmea_message;
   if(! nmea_message.SetMessage(nmea0183_sentence))
   {
     return; // Some kind of bad data?
   }
-  
 
   //
   //  GPS/Location Messages

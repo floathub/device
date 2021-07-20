@@ -49,6 +49,6 @@
 //#define BARO_DEBUG_ON	
 //#define ACTIVE_DEBUG_ON
 //#define SERIAL_DEBUG_ON
-//#define SOFTSERIAL_DEBUG_ON
+//#define HSNMEA_DEBUG_ON
 
 
