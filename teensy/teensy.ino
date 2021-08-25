@@ -319,7 +319,6 @@ byte nmea_cycle;
 
 bool           gps_valid = false;
 String         gps_utc = "";          //  UTC time and date
-unsigned long  gps_utc_unix = 0;
 String         gps_latitude = "";
 String         gps_longitude = "";
 String         gps_sog = "";          //  Speed over ground
@@ -955,26 +954,21 @@ void parse_gps_buffer_as_rmc()
     As long as the year is "reasonable", assume we have something close to right time
   */
 
-  if(gps_time_year > 2010 && is_valid == "A")
+  if(gps_time_year > 2020)
   {
     setTime(gps_time_hour,gps_time_minute,gps_time_second,gps_time_day,gps_time_month,gps_time_year);
-    gps_utc_unix = now();
-    if(!gps_valid) 
-    {
-      #ifdef GPS_DEBUG_ON
-      debug_info(F("Gps fix"));
-      #endif
-    }
+  }
+
+  /*
+    Check that the GPS is reporting fix as valid (not test mode, display mode, invalid, etc.)
+  */
+
+  if(is_valid == "A")
+  {
     gps_valid = true;
   }
   else
   {
-    if(gps_valid)
-    {
-      #ifdef GPS_DEBUG_ON
-      debug_info(F("Gps no fix"));
-      #endif
-    }
     gps_valid = false;
   }
   
@@ -1068,7 +1062,6 @@ void parse_gps_buffer_as_rmc()
 
 void parse_gps_buffer_as_gga()
 {
-
   int time_start = 6;
   int lat_start =  gps_read_buffer.indexOf(',', time_start + 1);
   int nors_start =  gps_read_buffer.indexOf(',', lat_start + 1);
@@ -1153,7 +1146,6 @@ void parse_gps_buffer_as_gga()
   {
     gps_valid = false;
   }
-  
 }
 
 void push_hsnmea_only_to_esp8266()

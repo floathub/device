@@ -161,6 +161,8 @@ void HandleNMEA2000Messages(const tN2kMsg &N2kMsg)
   //Serial.println(N2kMsg.PGN);
   
   switch (N2kMsg.PGN) {
+    case 126992UL: HandleSystemTime(N2kMsg); break;
+
     case 127250UL: HandleHeading(N2kMsg); break;
     case 127258UL: HandleVariation(N2kMsg); break;
     case 128259UL: HandleBoatSpeed(N2kMsg); break;
@@ -316,18 +318,14 @@ void HandleGNSS(const tN2kMsg &N2kMsg)
                     GNSStype, GNSSmethod, n2k_siv, n2k_hdp, PDOP, n2k_fix_geosep,
                     nReferenceStations, ReferenceStationType, ReferenceStationID, fix_age) ) 
   {
-    unsigned long unix_time = ( (unsigned long) n2k_fix_days_1970  * 3600UL * 24UL) + n2k_fix_seconds;
-
     
-
     // If the UNIX time is some time after 2020, and the GNSSmethod is good, this is all valid 
     
-    if(unix_time > 1587614400UL && GNSSmethod > 0 && GNSSmethod < 6)
+    if(GNSSmethod > 0 && GNSSmethod < 6)
     {
       n2k_fix_valid          = true;
       n2k_location_timestamp = millis();
       n2k_fix_timestamp      = millis();
-      setTime(unix_time);
     }
     else
     {
@@ -338,8 +336,29 @@ void HandleGNSS(const tN2kMsg &N2kMsg)
       n2k_fix_timestamp      = 0;
       n2k_fix_valid          = false;
     }
+
+    unsigned long unix_time = ( (unsigned long) n2k_fix_days_1970  * 3600UL * 24UL) + n2k_fix_seconds;
+
+    if( unix_time > 1587614400UL )
+    {
+      setTime(unix_time);
+    }
   }
 
+}
+
+void HandleSystemTime(const tN2kMsg &N2kMsg)
+{
+  unsigned char SID;
+  uint16_t SystemDate;
+  double SystemTime;
+  tN2kTimeSource TimeSource;
+  
+  if ( ParseN2kPGN126992(N2kMsg, SID, SystemDate, SystemTime, TimeSource) )
+  {
+    Serial.print("COWABUNGA SystemDate="); Serial.println(SystemDate);
+    Serial.print("COWABUNGA SystemTime="); Serial.println(SystemTime);
+  }
 }
 
 void HandleEnvironment(const tN2kMsg &N2kMsg)
