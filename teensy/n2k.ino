@@ -161,7 +161,6 @@ void HandleNMEA2000Messages(const tN2kMsg &N2kMsg)
   //Serial.println(N2kMsg.PGN);
   
   switch (N2kMsg.PGN) {
-    case 126992UL: HandleSystemTime(N2kMsg); break;
 
     case 127250UL: HandleHeading(N2kMsg); break;
     case 127258UL: HandleVariation(N2kMsg); break;
@@ -345,20 +344,6 @@ void HandleGNSS(const tN2kMsg &N2kMsg)
     }
   }
 
-}
-
-void HandleSystemTime(const tN2kMsg &N2kMsg)
-{
-  unsigned char SID;
-  uint16_t SystemDate;
-  double SystemTime;
-  tN2kTimeSource TimeSource;
-  
-  if ( ParseN2kPGN126992(N2kMsg, SID, SystemDate, SystemTime, TimeSource) )
-  {
-    Serial.print("COWABUNGA SystemDate="); Serial.println(SystemDate);
-    Serial.print("COWABUNGA SystemTime="); Serial.println(SystemTime);
-  }
 }
 
 void HandleEnvironment(const tN2kMsg &N2kMsg)
