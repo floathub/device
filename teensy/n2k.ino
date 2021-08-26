@@ -1004,8 +1004,63 @@ void n2k_output()
        }
     }
   }
+  else if(n2k_output_cycle == 7)
+  {
+    //
+    //  Build custom 0183 Messages as the library does not natively support XDR
+    //
+    
+    if( !N2kIsNA(n2k_air_temperature))
+    {
+      tNMEA0183Msg NMEA0183Msg;
+      if ( 
+            NMEA0183Msg.Init("XDR", "II") 
+            &&
+            NMEA0183Msg.AddStrField("C")
+            && 
+            NMEA0183Msg.AddDoubleField(n2k_air_temperature -  273.15, 1,tNMEA0183Msg::DefDoubleFormat,"C")
+            &&
+            NMEA0183Msg.AddStrField("TempAir")
+          )
+       {
+         push_out_message(NMEA0183Msg, FLAG_ENV_N2K_TO_NMEA);
+       }
+    }
+    if( !N2kIsNA(n2k_water_temperature))
+    {
+      tNMEA0183Msg NMEA0183Msg;
+      if ( 
+            NMEA0183Msg.Init("XDR", "II") 
+            &&
+            NMEA0183Msg.AddStrField("C")
+            && 
+            NMEA0183Msg.AddDoubleField(n2k_water_temperature -  273.15, 1,tNMEA0183Msg::DefDoubleFormat,"C")
+            &&
+            NMEA0183Msg.AddStrField("ENV_WATER_T")
+          )
+       {
+         push_out_message(NMEA0183Msg, FLAG_ENV_N2K_TO_NMEA);
+       }
+    }
+    if( !N2kIsNA(n2k_air_pressure))
+    {
+      tNMEA0183Msg NMEA0183Msg;
+      if ( 
+            NMEA0183Msg.Init("XDR", "II") 
+            &&
+            NMEA0183Msg.AddStrField("P")
+            && 
+            NMEA0183Msg.AddDoubleField(PascalTomBar(n2k_air_pressure) / 1000.0, 1,tNMEA0183Msg::DefDoubleFormat,"B")
+            &&
+            NMEA0183Msg.AddStrField("Barometer")
+          )
+       {
+         push_out_message(NMEA0183Msg, FLAG_ENV_N2K_TO_NMEA);
+       }
+    }
+  }
   n2k_output_cycle += 1;
-  if(n2k_output_cycle >= 7)
+  if(n2k_output_cycle >= 8)
   {
     n2k_output_cycle = 0;
   }
