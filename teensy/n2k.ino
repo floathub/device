@@ -56,6 +56,15 @@ void n2k_setup()
   n2k_water_temperature = N2kDoubleNA;
   n2k_water_temperature_timestamp = 0;
 
+  n2k_air_temperature = N2kDoubleNA;
+  n2k_air_temperature_timestamp = 0;
+
+  n2k_air_pressure = N2kDoubleNA;
+  n2k_air_pressure_timestamp = 0;
+
+  n2k_humidity = N2kDoubleNA;
+  n2k_humidity_timestamp = 0;
+
   n2k_wind_true_speed = N2kDoubleNA;
   n2k_wind_true_direction = N2kDoubleNA;
   n2k_wind_true_timestamp = 0;
@@ -169,7 +178,14 @@ void HandleNMEA2000Messages(const tN2kMsg &N2kMsg)
     case 129025UL: HandlePosition(N2kMsg); break;
     case 129026UL: HandleCOGSOG(N2kMsg); break;
     case 129029UL: HandleGNSS(N2kMsg); break;
+
     case 130310UL: HandleEnvironment(N2kMsg); break;
+    case 130311UL: HandleTempPressHumid(N2kMsg); break;
+    case 130312UL: HandleTemperature(N2kMsg); break;
+    case 130313UL: HandleHumidity(N2kMsg); break;
+    case 130314UL: HandlePressure(N2kMsg); break;
+    case 130316UL: HandleAccurateTemperature(N2kMsg); break;
+
     case 130306UL: HandleWind(N2kMsg); break;
     case 127508UL: HandleBattery(N2kMsg); break;
 
@@ -349,14 +365,166 @@ void HandleGNSS(const tN2kMsg &N2kMsg)
 void HandleEnvironment(const tN2kMsg &N2kMsg)
 {
   unsigned char SID;
-  double air_temp, pressure;
+  double water_temp, air_temp, pressure;
 
-  if ( ParseN2kPGN130310(N2kMsg,SID,n2k_water_temperature, air_temp, pressure) )
+  if ( ParseN2kPGN130310(N2kMsg,SID, water_temp, air_temp, pressure) )
   {
     //Serial.println(n2k_water_temperature);
     n2k_water_temperature_timestamp=millis();
+    
+    if(water_temp != N2kDoubleNA)
+    {
+      n2k_water_temperature = water_temp;
+      n2k_water_temperature_timestamp=millis();
+    }
+    if(air_temp != N2kDoubleNA)
+    {
+      n2k_air_temperature = air_temp;
+      n2k_air_temperature_timestamp=millis();
+    }
+    if(pressure != N2kDoubleNA)
+    {
+      n2k_air_pressure = pressure;
+      n2k_air_pressure_timestamp=millis();
+    }
   }
 }
+
+void HandleTempPressHumid(const tN2kMsg &N2kMsg)
+{
+
+  unsigned char      SID;
+  tN2kTempSource     TempSource;
+  tN2kHumiditySource HumiditySource;
+  double             temperature_value;
+  double             humidity_value;
+  double	     pressure_value;
+
+  if ( ParseN2kPGN130311(N2kMsg, SID, TempSource, temperature_value, HumiditySource, humidity_value, pressure_value) )
+  {
+  
+    if((TempSource == N2kts_OutsideTemperature   || 
+        TempSource == N2kts_InsideTemperature    ||
+        TempSource == N2kts_MainCabinTemperature )
+        && temperature_value != N2kDoubleNA)
+    {
+      n2k_air_temperature = temperature_value;
+      n2k_air_temperature_timestamp = millis();
+    }
+
+    if( TempSource == N2kts_SeaTemperature
+        && temperature_value != N2kDoubleNA)
+    {
+      n2k_water_temperature = temperature_value;
+      n2k_water_temperature_timestamp = millis();
+    }
+    if( pressure_value != N2kDoubleNA)
+    {
+      n2k_air_pressure = pressure_value;
+      n2k_air_pressure_timestamp = millis();
+    }
+    if((HumiditySource == N2khs_InsideHumidity   || 
+        HumiditySource == N2khs_OutsideHumidity  )
+        && humidity_value != N2kDoubleNA)
+    {
+      n2k_humidity = humidity_value;
+      n2k_humidity_timestamp = millis();
+    }
+  }
+
+}
+
+void HandleTemperature(const tN2kMsg &N2kMsg)
+{
+
+  unsigned char      SID, Instance;
+  tN2kTempSource     TempSource;
+  double	     temperature_value;
+  double	     set_value;
+
+  if (ParseN2kPGN130312(N2kMsg, SID, Instance, TempSource, temperature_value, set_value) )
+  {
+    if((TempSource == N2kts_OutsideTemperature   || 
+        TempSource == N2kts_InsideTemperature    ||
+        TempSource == N2kts_MainCabinTemperature )
+        && temperature_value != N2kDoubleNA)
+    {
+      n2k_air_temperature = temperature_value;
+      n2k_air_temperature_timestamp = millis();
+    }
+
+    if( TempSource == N2kts_SeaTemperature
+        && temperature_value != N2kDoubleNA)
+    {
+      n2k_water_temperature = temperature_value;
+      n2k_water_temperature_timestamp = millis();
+    }
+  }
+}   
+
+void HandleHumidity(const tN2kMsg &N2kMsg)
+{
+  unsigned char      SID, Instance;
+  tN2kHumiditySource HumiditySource;
+  double	     humidity_value;
+  double	     set_value;
+  
+  if( ParseN2kPGN130313(N2kMsg, SID, Instance, HumiditySource, humidity_value, set_value) )
+  {
+    if((HumiditySource == N2khs_InsideHumidity   || 
+        HumiditySource == N2khs_OutsideHumidity  )
+        && humidity_value != N2kDoubleNA)
+    {
+      n2k_humidity = humidity_value;
+      n2k_humidity_timestamp = millis();
+    }
+  } 
+}
+
+void HandlePressure(const tN2kMsg &N2kMsg)
+{
+  unsigned char      SID, Instance;
+  tN2kPressureSource PressureSource;
+  double	     pressure_value;
+  
+  if( ParseN2kPGN130314(N2kMsg, SID, Instance, PressureSource, pressure_value) )
+  {
+    if( PressureSource == N2kps_Atmospheric && pressure_value != N2kDoubleNA)
+    {
+      n2k_air_pressure = pressure_value;
+      n2k_air_pressure_timestamp = millis();
+    }
+  } 
+}
+
+void HandleAccurateTemperature(const tN2kMsg &N2kMsg)
+{
+
+  unsigned char      SID, Instance;
+  tN2kTempSource     TempSource;
+  double	     temperature_value;
+  double	     set_value;
+
+  if (ParseN2kPGN130316(N2kMsg, SID, Instance, TempSource, temperature_value, set_value) )
+  {
+    if((TempSource == N2kts_OutsideTemperature   || 
+        TempSource == N2kts_InsideTemperature    ||
+        TempSource == N2kts_MainCabinTemperature )
+        && temperature_value != N2kDoubleNA)
+    {
+      n2k_air_temperature = temperature_value;
+      n2k_air_temperature_timestamp = millis();
+    }
+
+    if( TempSource == N2kts_SeaTemperature
+        && temperature_value != N2kDoubleNA)
+    {
+      n2k_water_temperature = temperature_value;
+      n2k_water_temperature_timestamp = millis();
+    }
+  }
+}   
+
 
 void HandleWind(const tN2kMsg &N2kMsg)
 {
@@ -705,6 +873,18 @@ void n2k_output()
   if (n2k_water_temperature_timestamp + N2K_NORMAL_VALID_DURATION < millis())
   {
     n2k_water_temperature = N2kDoubleNA;
+  }
+  if (n2k_air_temperature_timestamp + N2K_NORMAL_VALID_DURATION < millis())
+  {
+    n2k_air_temperature = N2kDoubleNA;
+  }
+  if (n2k_air_pressure_timestamp + N2K_NORMAL_VALID_DURATION < millis())
+  {
+    n2k_air_pressure = N2kDoubleNA;
+  }
+  if (n2k_humidity_timestamp + N2K_NORMAL_VALID_DURATION < millis())
+  {
+    n2k_humidity = N2kDoubleNA;
   }
   if (n2k_wind_true_timestamp + N2K_NORMAL_VALID_DURATION < millis())
   {

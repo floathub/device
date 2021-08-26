@@ -297,6 +297,7 @@ bool currently_active = true;
 #define TEMPERATURE_BIAS 13	//  degrees F that BMP, on average, over reports temperature by
 float temperature;
 float pressure;
+float humidity;
 float temperature_vector[OUTLIER_VECTOR_SIZE];
 
 
@@ -677,6 +678,13 @@ void bhware_read()
 
   temperature = (1.8 * bhware.readTemperature()) + 32 - TEMPERATURE_BIAS ;
   pressure = bhware.readPressure() * 0.000295300;  
+#if BARO_HWARE == BARO_HWARE_BME280
+  humidity = bhware.readHumidity();
+#elif BARO_HWARE == BARO_HWARE_BME680
+  humidity = bhware.readHumidity();
+#else
+  humidity = -1.0;
+#endif
 
   //
   //  On some boats this temp/pressure chip seems to get "stuck".  It is
@@ -1524,6 +1532,41 @@ void possibly_append_data(float value, float test, String tag)
   }
 }
 
+void add_temp_pressure_humidity_to_state()
+{
+
+  float temperature_to_send = temperature;
+  float pressure_to_send = pressure;
+  float humidity_to_send = humidity;
+  
+  #ifdef N2K_CODE_ON
+
+  if(n2k_air_temperature != N2kDoubleNA)
+  {
+    temperature_to_send = ((n2k_air_temperature - 273.15) * 9.0/5.0) + 32.0;
+  }
+  if(n2k_air_pressure != N2kDoubleNA)
+  {
+    pressure_to_send = n2k_air_pressure * 0.000295300;
+  }  
+  if(n2k_humidity != N2kDoubleNA)
+  {
+    humidity_to_send = n2k_humidity;
+  }  
+
+  #endif
+
+  latest_message_to_send += F(",T:");
+  append_float_to_string(latest_message_to_send, temperature_to_send);
+
+  latest_message_to_send += F(",P:");
+  append_float_to_string(latest_message_to_send, pressure_to_send);
+
+  latest_message_to_send += F(",Z:");
+  append_float_to_string(latest_message_to_send, humidity_to_send);
+}
+
+
 
 void report_state(bool console_only)
 {
@@ -1557,13 +1600,9 @@ void report_state(bool console_only)
     latest_message_to_send += F(",I:");
     latest_message_to_send += mac_address;
   }
+
+  add_temp_pressure_humidity_to_state();
   
-  latest_message_to_send += F(",T:");
-  append_float_to_string(latest_message_to_send, temperature);
-
-  latest_message_to_send += F(",P:");
-  append_float_to_string(latest_message_to_send, pressure);
-
   if(gps_valid == true && gps_altitude.length() > 0)
   {
     latest_message_to_send += F(",L:");

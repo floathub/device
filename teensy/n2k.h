@@ -76,9 +76,15 @@ double n2k_fix_seconds;
 bool n2k_fix_valid;
 
 
-// Water Temp
+// Environment
 double n2k_water_temperature;
 unsigned long n2k_water_temperature_timestamp;
+double n2k_air_temperature;
+unsigned long n2k_air_temperature_timestamp;
+double n2k_air_pressure;
+unsigned long n2k_air_pressure_timestamp;
+double n2k_humidity;
+unsigned long n2k_humidity_timestamp;
 
 // Wind
 double n2k_wind_true_speed;
