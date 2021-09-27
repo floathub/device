@@ -1926,6 +1926,7 @@ void handleAdvanced()
       virtual_serial_changed = true;
     }
     
+    #ifdef N2K_CODE_ON
     String new_cflags = web_server.arg("cflags");
     if(new_cflags.length() == 16)
     {
@@ -1947,6 +1948,7 @@ void handleAdvanced()
         conversion_flags = new_cflags_value;
       }
     }
+    #endif
     
     
     write_eeprom_memory(); 
@@ -1995,8 +1997,12 @@ void handleAdvanced()
     page += " checked";
   }
   page += "><br>";
+  
+  #ifdef N2K_CODE_ON
   page += "<label for='cflags'>Conversion Flags: </label>";
   page += "<input type='number' name='cflags' length='16' maxlength='16' value='" + String(conversion_flags, BIN) + "' ><br>";
+  #endif
+
   page += "<br>";
   page += "<button type='submit' name='savebutton' value='True'>Save</button>";
   page += "</form></div><br>";

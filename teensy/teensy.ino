@@ -297,6 +297,7 @@ bool currently_active = true;
 #define TEMPERATURE_BIAS 13	//  degrees F that BMP, on average, over reports temperature by
 float temperature;
 float pressure;
+float humidity;
 float temperature_vector[OUTLIER_VECTOR_SIZE];
 
 
@@ -319,7 +320,6 @@ byte nmea_cycle;
 
 bool           gps_valid = false;
 String         gps_utc = "";          //  UTC time and date
-unsigned long  gps_utc_unix = 0;
 String         gps_latitude = "";
 String         gps_longitude = "";
 String         gps_sog = "";          //  Speed over ground
@@ -678,6 +678,13 @@ void bhware_read()
 
   temperature = (1.8 * bhware.readTemperature()) + 32 - TEMPERATURE_BIAS ;
   pressure = bhware.readPressure() * 0.000295300;  
+#if BARO_HWARE == BARO_HWARE_BME280
+  humidity = bhware.readHumidity();
+#elif BARO_HWARE == BARO_HWARE_BME680
+  humidity = bhware.readHumidity();
+#else
+  humidity = -1.0;
+#endif
 
   //
   //  On some boats this temp/pressure chip seems to get "stuck".  It is
@@ -955,26 +962,21 @@ void parse_gps_buffer_as_rmc()
     As long as the year is "reasonable", assume we have something close to right time
   */
 
-  if(gps_time_year > 2010 && is_valid == "A")
+  if(gps_time_year > 2020)
   {
     setTime(gps_time_hour,gps_time_minute,gps_time_second,gps_time_day,gps_time_month,gps_time_year);
-    gps_utc_unix = now();
-    if(!gps_valid) 
-    {
-      #ifdef GPS_DEBUG_ON
-      debug_info(F("Gps fix"));
-      #endif
-    }
+  }
+
+  /*
+    Check that the GPS is reporting fix as valid (not test mode, display mode, invalid, etc.)
+  */
+
+  if(is_valid == "A")
+  {
     gps_valid = true;
   }
   else
   {
-    if(gps_valid)
-    {
-      #ifdef GPS_DEBUG_ON
-      debug_info(F("Gps no fix"));
-      #endif
-    }
     gps_valid = false;
   }
   
@@ -1068,7 +1070,6 @@ void parse_gps_buffer_as_rmc()
 
 void parse_gps_buffer_as_gga()
 {
-
   int time_start = 6;
   int lat_start =  gps_read_buffer.indexOf(',', time_start + 1);
   int nors_start =  gps_read_buffer.indexOf(',', lat_start + 1);
@@ -1153,7 +1154,6 @@ void parse_gps_buffer_as_gga()
   {
     gps_valid = false;
   }
-  
 }
 
 void push_hsnmea_only_to_esp8266()
@@ -1423,6 +1423,10 @@ void append_formatted_value(String &the_string, int value)
 
 void add_timestamp_to_string(String &the_string)
 {
+  Serial.print("COWABUNGA gps_valid    is "); Serial.println(gps_valid);
+  Serial.print("COWABUNGA timeStatus() is "); Serial.println(timeStatus());
+  Serial.print("COWABUNGA timeNotSet   is "); Serial.println(timeNotSet);
+
   the_string += F(",U:");
   append_formatted_value(the_string, hour());
   append_formatted_value(the_string, minute());
@@ -1451,7 +1455,8 @@ void individual_pump_read(int pump_number, bool &state, int analog_input)
        latest_message_to_send += F(":");
        latest_message_to_send += FLOATHUB_PROTOCOL_VERSION;
        latest_message_to_send += F("$");
-       if(gps_valid || timeStatus() != timeNotSet)
+       //if(gps_valid || timeStatus() != timeNotSet)
+       if(timeStatus() != timeNotSet)
        {
          add_timestamp_to_string(latest_message_to_send);
        }
@@ -1483,7 +1488,8 @@ void individual_pump_read(int pump_number, bool &state, int analog_input)
        latest_message_to_send += FLOATHUB_PROTOCOL_VERSION;
        latest_message_to_send += F("$");
 
-       if(gps_valid || timeStatus() != timeNotSet)
+       //if(gps_valid || timeStatus() != timeNotSet)
+       if(timeStatus() != timeNotSet)
        {
          add_timestamp_to_string(latest_message_to_send);
        }
@@ -1532,6 +1538,41 @@ void possibly_append_data(float value, float test, String tag)
   }
 }
 
+void add_temp_pressure_humidity_to_state()
+{
+
+  float temperature_to_send = temperature;
+  float pressure_to_send = pressure;
+  float humidity_to_send = humidity;
+  
+  #ifdef N2K_CODE_ON
+
+  if(n2k_air_temperature != N2kDoubleNA)
+  {
+    temperature_to_send = ((n2k_air_temperature - 273.15) * 9.0/5.0) + 32.0;
+  }
+  if(n2k_air_pressure != N2kDoubleNA)
+  {
+    pressure_to_send = n2k_air_pressure * 0.000295300;
+  }  
+  if(n2k_humidity != N2kDoubleNA)
+  {
+    humidity_to_send = n2k_humidity;
+  }  
+
+  #endif
+
+  latest_message_to_send += F(",T:");
+  append_float_to_string(latest_message_to_send, temperature_to_send);
+
+  latest_message_to_send += F(",P:");
+  append_float_to_string(latest_message_to_send, pressure_to_send);
+
+  latest_message_to_send += F(",Z:");
+  append_float_to_string(latest_message_to_send, humidity_to_send);
+}
+
+
 
 void report_state(bool console_only)
 {
@@ -1555,7 +1596,8 @@ void report_state(bool console_only)
   latest_message_to_send += F(":");
   latest_message_to_send += FLOATHUB_PROTOCOL_VERSION;
   latest_message_to_send += F("$");
-  if(gps_valid == true || timeStatus() != timeNotSet )
+  //if(gps_valid == true || timeStatus() != timeNotSet )
+  if(timeStatus() != timeNotSet )
   {
      add_timestamp_to_string(latest_message_to_send);
   }
@@ -1565,13 +1607,9 @@ void report_state(bool console_only)
     latest_message_to_send += F(",I:");
     latest_message_to_send += mac_address;
   }
+
+  add_temp_pressure_humidity_to_state();
   
-  latest_message_to_send += F(",T:");
-  append_float_to_string(latest_message_to_send, temperature);
-
-  latest_message_to_send += F(",P:");
-  append_float_to_string(latest_message_to_send, pressure);
-
   if(gps_valid == true && gps_altitude.length() > 0)
   {
     latest_message_to_send += F(",L:");
