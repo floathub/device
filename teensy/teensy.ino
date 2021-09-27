@@ -1423,6 +1423,10 @@ void append_formatted_value(String &the_string, int value)
 
 void add_timestamp_to_string(String &the_string)
 {
+  Serial.print("COWABUNGA gps_valid    is "); Serial.println(gps_valid);
+  Serial.print("COWABUNGA timeStatus() is "); Serial.println(timeStatus());
+  Serial.print("COWABUNGA timeNotSet   is "); Serial.println(timeNotSet);
+
   the_string += F(",U:");
   append_formatted_value(the_string, hour());
   append_formatted_value(the_string, minute());
@@ -1451,7 +1455,8 @@ void individual_pump_read(int pump_number, bool &state, int analog_input)
        latest_message_to_send += F(":");
        latest_message_to_send += FLOATHUB_PROTOCOL_VERSION;
        latest_message_to_send += F("$");
-       if(gps_valid || timeStatus() != timeNotSet)
+       //if(gps_valid || timeStatus() != timeNotSet)
+       if(timeStatus() != timeNotSet)
        {
          add_timestamp_to_string(latest_message_to_send);
        }
@@ -1483,7 +1488,8 @@ void individual_pump_read(int pump_number, bool &state, int analog_input)
        latest_message_to_send += FLOATHUB_PROTOCOL_VERSION;
        latest_message_to_send += F("$");
 
-       if(gps_valid || timeStatus() != timeNotSet)
+       //if(gps_valid || timeStatus() != timeNotSet)
+       if(timeStatus() != timeNotSet)
        {
          add_timestamp_to_string(latest_message_to_send);
        }
@@ -1590,7 +1596,8 @@ void report_state(bool console_only)
   latest_message_to_send += F(":");
   latest_message_to_send += FLOATHUB_PROTOCOL_VERSION;
   latest_message_to_send += F("$");
-  if(gps_valid == true || timeStatus() != timeNotSet )
+  //if(gps_valid == true || timeStatus() != timeNotSet )
+  if(timeStatus() != timeNotSet )
   {
      add_timestamp_to_string(latest_message_to_send);
   }
