@@ -1,5 +1,6 @@
 #ifdef N2K_CODE_ON
 
+
 #include "n2k.h"
 //#include "globals.h"
 #include <N2kMessages.h>

@@ -1423,10 +1423,6 @@ void append_formatted_value(String &the_string, int value)
 
 void add_timestamp_to_string(String &the_string)
 {
-  Serial.print("COWABUNGA gps_valid    is "); Serial.println(gps_valid);
-  Serial.print("COWABUNGA timeStatus() is "); Serial.println(timeStatus());
-  Serial.print("COWABUNGA timeNotSet   is "); Serial.println(timeNotSet);
-
   the_string += F(",U:");
   append_formatted_value(the_string, hour());
   append_formatted_value(the_string, minute());
@@ -1568,8 +1564,11 @@ void add_temp_pressure_humidity_to_state()
   latest_message_to_send += F(",P:");
   append_float_to_string(latest_message_to_send, pressure_to_send);
 
-  latest_message_to_send += F(",Z:");
-  append_float_to_string(latest_message_to_send, humidity_to_send);
+  if(humidity_to_send != -1.0)
+  {
+    latest_message_to_send += F(",Z:");
+    append_float_to_string(latest_message_to_send, humidity_to_send);
+  }
 }
 
 

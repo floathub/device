@@ -186,6 +186,7 @@ int		send_message_failures = 0;	//  Number of times we can fail to send somethin
 #define		MAX_SEND_MESSAGE_FAILURES 5
 float           speed_threshold = 1.75;
 byte		stationary_interval = 10;
+#define         OUTLIER_VECTOR_SIZE 7
 float           speed_vector[7];
 
 /*
@@ -304,6 +305,8 @@ bool currently_active = true;
 #define TEMPERATURE_BIAS 5	//  degrees F that BMP, on average, over reports temperature by
 float temperature;
 float pressure;
+float humidity;
+float temperature_vector[OUTLIER_VECTOR_SIZE];
 
 
 
@@ -1014,7 +1017,34 @@ void bhware_read()
   
   temperature = (1.8 * bhware.readTemperature()) + 32 - TEMPERATURE_BIAS ;
   pressure = bhware.readPressure() * 0.000295300;  
+#if BARO_HWARE == BARO_HWARE_BME280
+  humidity = bhware.readHumidity();
+#elif BARO_HWARE == BARO_HWARE_BME680
+  humidity = bhware.readHumidity();
+#else
+  humidity = -1.0;
+#endif
 
+  //
+  //  On some boats this temp/pressure chip seems to get "stuck".  It is
+  //  probably a low voltage issue.  This checks if readings are static and
+  //  tries to "reboot" the chip if they are.
+  //
+
+  bool all_same = true;
+  for(i=0; i< OUTLIER_VECTOR_SIZE - 1; i++)
+  {
+      temperature_vector[i] = temperature_vector[i+1];
+      if (temperature != temperature_vector[i])
+      {
+        all_same = false;
+      }
+  }
+  if(all_same)
+  {
+    bhware_setup();
+  }
+  
   //
   //	Output Temperature and Pressure as NMEA sentences in case anyone is listening
   //
@@ -1816,6 +1846,12 @@ void report_state(bool console_only)
 
   latest_message_to_send += F(",P:");
   append_float_to_string(latest_message_to_send, pressure);
+
+  if(humidity != -1.0)
+  {
+    latest_message_to_send += F(",Z:");
+    append_float_to_string(latest_message_to_send, humidity);
+  }
 
   if(gps_valid == true && gps_altitude.length() > 0)
   {
