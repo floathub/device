@@ -1074,12 +1074,14 @@ void n2k_output()
   if(FLAG_ENV_INT_TO_N2K && n2k_output_cycle == 0)
   {
     tN2kMsg N2kMsg;
-    double water_temperature_to_send = n2k_water_temperature;
-    if(water_temperature_to_send != N2kDoubleNA)
+
+    double water_temperature_to_send = N2kDoubleNA;
+    if(FLAG_ENV_NMEA_TO_N2K && millis() - nmea_water_temperature_timestamp < nmea_sample_interval)
     {
-      water_temperature_to_send = CToKelvin(n2k_water_temperature);
+      water_temperature_to_send = FToKelvin(nmea_water_temperature);
     }
     SetN2kPGN130310(N2kMsg, next_sequence_id(), water_temperature_to_send, FToKelvin(temperature), pressure * 3386.0);
+    // SetN2kPGN130310(N2kMsg, next_sequence_id(), N2kDoubleNA, FToKelvin(temperature), pressure * 3386.0);
     NMEA2000.SendMsg(N2kMsg);
 
   }
