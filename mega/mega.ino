@@ -505,13 +505,14 @@ void gps_setup()
   //   	Or a uBlox NEO-6M
   // 
 
+
   Serial3.println("$PUBX,40,GLL,0,0,0,0,0,0*5C");
   Serial3.println("$PUBX,40,GGA,0,1,0,0,0,0*5B"); 
   Serial3.println("$PUBX,40,GSA,0,0,0,0,0,0*4E");
   Serial3.println("$PUBX,40,RMC,0,1,0,0,0,0*46");
   Serial3.println("$PUBX,40,GSV,0,0,0,0,0,0*59");
   Serial3.println("$PUBX,40,VTG,0,0,0,0,0,0*5E");
-  
+
   //
   //	Assuming a NEO-6M, try and set it to "at-sea" mode
   //
@@ -552,7 +553,6 @@ void gps_setup()
   */
 
 
-  
   uint8_t configure_gps_command[] = {
     0xB5, 0x62,			// Ublox "sync" characters
     0x06, 0x24, 		// Message class and ID (class is configuration, id is navigation confiuration 
@@ -581,6 +581,7 @@ void gps_setup()
   }
   Serial3.println();
 
+ 
   /*
   byte gps_set_sucess = 0 ;
   while(!gps_set_sucess)
@@ -1641,6 +1642,14 @@ void gps_read()
             parse_gps_buffer_as_gga();
 	  }
         }
+        #ifdef GPS_DEBUG_ON
+        else
+	{
+          debug_info(F("Other GPS sentence ----------"));
+	  debug_info(gps_read_buffer);
+          debug_info(F("------------------ ----------"));
+	}
+        #endif
       }
       gps_read_buffer = "";
     }
