@@ -26,6 +26,20 @@
 
 
 /*
+   Option for different kinds of GPS Hardware
+*/
+
+#define GPS_HWARE_OLD_ULTIMATE 1
+#define GPS_HWARE_NEW_ULTIMATE 2
+#define GPS_HWARE_HILETGO      3
+
+
+//#define GPS_HWARE GPS_HWARE_OLD_ULTIMATE
+#define GPS_HWARE GPS_HWARE_NEW_ULTIMATE
+//#define GPS_HWARE GPS_HWARE_HILETGO
+
+
+/*
   Is this an n2k version?
 */
 
