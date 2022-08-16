@@ -1674,13 +1674,13 @@ void gps_read()
 
 void voltage_read()
 {
-  battery_one 	= analogRead(1) / 37.213; 
-  battery_two 	= analogRead(2) / 37.213;
-  battery_three = analogRead(3) / 37.213; 
+  battery_one 	= analogRead(1) / VOLTAGE_DIVIDER; 
+  battery_two 	= analogRead(2) / VOLTAGE_DIVIDER;
+  battery_three = analogRead(3) / VOLTAGE_DIVIDER; 
 
-  charger_one 	= analogRead(4) / 37.213; 
-  charger_two 	= analogRead(5) / 37.213; 
-  charger_three	= analogRead(6) / 37.213;
+  charger_one 	= analogRead(4) / VOLTAGE_DIVIDER; 
+  charger_two 	= analogRead(5) / VOLTAGE_DIVIDER; 
+  charger_three	= analogRead(6) / VOLTAGE_DIVIDER;
 }
 
 
@@ -1712,7 +1712,7 @@ void add_timestamp_to_string(String &the_string)
 
 void individual_pump_read(int pump_number, pump_state &state, int analog_input)
 {
-  float pump_value = analogRead(analog_input) / 37.213;
+  float pump_value = analogRead(analog_input) / VOLTAGE_DIVIDER;
   #ifdef PUMP_DEBUG_ON
   debug_info(F("Pump ") + String(pump_number) + F(" on input ") + String(analog_input) + F(" reads "), pump_value);
   #endif

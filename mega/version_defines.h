@@ -19,11 +19,18 @@
 #define BARO_HWARE_BME680 3
 #define BARO_HWARE_BMP180 4
 
-#define BARO_HWARE BARO_HWARE_BMP280
-//#define BARO_HWARE BARO_HWARE_BME280
+//#define BARO_HWARE BARO_HWARE_BMP280
+#define BARO_HWARE BARO_HWARE_BME280
 //#define BARO_HWARE BARO_HWARE_BME680
 //#define BARO_HWARE BARO_HWARE_BMP180
 
+
+/*
+  Option for different voltage dividors
+*/
+
+//#define VOLTAGE_DIVIDER  37.213		// Orig Shield
+#define VOLTAGE_DIVIDER  23.5233        // Teensy-Compatible Shield
 
 
 /*
