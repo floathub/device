@@ -32,18 +32,20 @@
 #define GPS_HWARE_OLD_ULTIMATE 1
 #define GPS_HWARE_NEW_ULTIMATE 2
 #define GPS_HWARE_HILETGO      3
+#define GPS_HWARE_CASIC        4
 
 
 //#define GPS_HWARE GPS_HWARE_OLD_ULTIMATE
-#define GPS_HWARE GPS_HWARE_NEW_ULTIMATE
-//#define GPS_HWARE GPS_HWARE_HILETGO
+//#define GPS_HWARE GPS_HWARE_NEW_ULTIMATE
+#define GPS_HWARE GPS_HWARE_HILETGO
+//#define GPS_HWARE GPS_HWARE_CASIC
 
 
 /*
   Is this an n2k version?
 */
 
-#define N2K_CODE_ON
+//#define N2K_CODE_ON
 
 
 

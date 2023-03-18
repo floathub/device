@@ -495,102 +495,71 @@ void gps_setup()
   Serial3.begin(9600);
   delay(1000);
 
-  //
-  //	Configure in case the GPS is a MTK3339 / Ultimate GPS breakout from Adafruit
-  //
 
-  Serial3.println(F("$PMTK314,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0*28"));		// GGA & RMC every second
+  #if GPS_HWARE == GPS_HWARE_OLD_ULTIMATE
+    Serial3.println(F("$PMTK251,9600*17"));		// Set Baud
+    Serial3.println(F("$PMTK314,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0*28"));		// GGA & RMC every second
+  #elif GPS_HWARE == GPS_HWARE_NEW_ULTIMATE
+    Serial3.println(F("$PMTK514,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0*2E"));		// GGA & RMC every second
 
-  //
-  //   	Or a uBlox NEO-6M
-  // 
+  #elif GPS_HWARE == GPS_HWARE_HILETGO
+
+    //
+    //   	Or a uBlox NEO-6M
+    // 
 
 
-  Serial3.println("$PUBX,40,GLL,0,0,0,0,0,0*5C");
-  Serial3.println("$PUBX,40,GGA,0,1,0,0,0,0*5B"); 
-  Serial3.println("$PUBX,40,GSA,0,0,0,0,0,0*4E");
-  Serial3.println("$PUBX,40,RMC,0,1,0,0,0,0*46");
-  Serial3.println("$PUBX,40,GSV,0,0,0,0,0,0*59");
-  Serial3.println("$PUBX,40,VTG,0,0,0,0,0,0*5E");
+    Serial3.println("$PUBX,40,GLL,0,0,0,0,0,0*5C");
+    Serial3.println("$PUBX,40,GGA,0,1,0,0,0,0*5B"); 
+    Serial3.println("$PUBX,40,GSA,0,0,0,0,0,0*4E");
+    Serial3.println("$PUBX,40,RMC,0,1,0,0,0,0*46");
+    Serial3.println("$PUBX,40,GSV,0,0,0,0,0,0*59");
+    Serial3.println("$PUBX,40,VTG,0,0,0,0,0,0*5E");
 
-  //
-  //	Assuming a NEO-6M, try and set it to "at-sea" mode
-  //
-
-  /*
-  uint8_t tester_thingy[] = 
-  {
-    0x06, 0x24, 		// Message class and ID (class is configuration, id is navigation confiuration 
-    0x24, 0x00, 		// 0x24 = 36 bytes in length of rest of message
-    0xFF, 0xFF, 		// Mask (all on = apply all settings that follow)
-    0x06,			// Set Dynamic platform model to 6 ("at sea") 
-    0x03, 			// Set fix mode to Auto 2D/3D
-    0x00, 0x00, 0x00, 0x00,	// Fixed altitude for 2D Mode 
-    0x10, 0x27, 0x00, 0x00, 	// Fixed altitude variance for 2D Mode 
-    0x05,			// Min elevation for a satellite to be used 
-    0x00,			// Max time to perform an extrapolation if GPS signal lost 
-    0xFA, 0x00, 		// Position DOP Mask
-    0xFA, 0x00, 		// Time DOP Mask
-    0x64, 0x00, 		// Position Accuracy Mask
-    0x2C, 0x01, 		// Time Accuracy Mask
-    0x1A, 			// Static Hold Threshold ( 0.5 knot = 26 cm/s = 0x1A)
-    0x00,			// DGPS timeout 
-    0x00, 0x00, 0x00, 0x00, 	// Always zero
-    0x00, 0x00, 0x00, 0x00, 	// Always zero
-    0x00, 0x00, 0x00, 0x00, 	// Always zero
-  };
   
-  uint8_t CK_A = 0;
-  uint8_t CK_B = 0;
-  for(i=0;i<40;i++)
-  {
-    CK_A = CK_A + tester_thingy[i] ;
-    CK_B = CK_B + CK_A ;
-  }
-  Serial.print("tester_thingy checksums is ");
-  Serial.print(CK_A, HEX);
-  Serial.println(CK_B, HEX);
-  */
+    //
+    //	Assuming a NEO-6M, try and set it to "at-sea" mode
+    //
 
 
-  uint8_t configure_gps_command[] = {
-    0xB5, 0x62,			// Ublox "sync" characters
-    0x06, 0x24, 		// Message class and ID (class is configuration, id is navigation confiuration 
-    0x24, 0x00, 		// 0x24 = 36 bytes in length of rest of message
-    0xFF, 0xFF, 		// Mask (all on = apply all settings that follow)
-    0x06,			// Set Dynamic platform model to 6 ("at sea") 
-    0x03, 			// Set fix mode to Auto 2D/3D
-    0x00, 0x00, 0x00, 0x00,	// Fixed altitude for 2D Mode 
-    0x10, 0x27, 0x00, 0x00, 	// Fixed altitude variance for 2D Mode 
-    0x05,			// Min elevation for a satellite to be used 
-    0x00,			// Max time to perform an extrapolation if GPS signal lost 
-    0xFA, 0x00, 		// Position DOP Mask
-    0xFA, 0x00, 		// Time DOP Mask
-    0x64, 0x00, 		// Position Accuracy Mask
-    0x2C, 0x01, 		// Time Accuracy Mask
-    0x1A, 			// Static Hold Threshold
-    0x00,			// DGPS timeout 
-    0x00, 0x00, 0x00, 0x00, 	// Always zero
-    0x00, 0x00, 0x00, 0x00, 	// Always zero
-    0x00, 0x00, 0x00, 0x00, 	// Always zero
-    0x30, 0x48 };
+    uint8_t configure_gps_command[] = {
+      0xB5, 0x62,			// Ublox "sync" characters
+      0x06, 0x24, 		// Message class and ID (class is configuration, id is navigation confiuration 
+      0x24, 0x00, 		// 0x24 = 36 bytes in length of rest of message
+      0xFF, 0xFF, 		// Mask (all on = apply all settings that follow)
+      0x05,			// Set Dynamic platform model to 5 ("at sea") 
+      0x03, 			// Set fix mode to Auto 2D/3D
+      0x00, 0x00, 0x00, 0x00,	// Fixed altitude for 2D Mode 
+      0x10, 0x27, 0x00, 0x00, 	// Fixed altitude variance for 2D Mode 
+      0x05,			// Min elevation for a satellite to be used 
+      0x00,			// Max time to perform an extrapolation if GPS signal lost 
+      0xFA, 0x00, 		// Position DOP Mask
+      0xFA, 0x00, 		// Time DOP Mask
+      0x64, 0x00, 		// Position Accuracy Mask
+      0x2C, 0x01, 		// Time Accuracy Mask
+      0x1A, 			// Static Hold Threshold
+      //0x24, 			// Static Hold Threshold 40 Hex = 36 cm/s = 0.75 knot
+      //0x4D, 			// Static Hold Threshold 40 Hex = 77 cm/s = 1.5 knot
+      0x00,			// DGPS timeout 
+      0x00, 0x00, 0x00, 0x00, 	// Always zero
+      0x00, 0x00, 0x00, 0x00, 	// Always zero
+      0x00, 0x00, 0x00, 0x00, 	// Always zero
+      0x2F, 0x26 };
   
-  for(i=0; i < sizeof(configure_gps_command)/sizeof(uint8_t); i++)
-  {
-    Serial3.write(configure_gps_command[i]);
-  }
-  Serial3.println();
+    for(i=0; i < sizeof(configure_gps_command)/sizeof(uint8_t); i++)
+    {
+      Serial3.write(configure_gps_command[i]);
+    }
+    Serial3.println();
 
- 
-  /*
-  byte gps_set_sucess = 0 ;
-  while(!gps_set_sucess)
-  {
-    sendUBX(configure_gps_command, sizeof(configure_gps_command)/sizeof(uint8_t));
-    gps_set_sucess=getUBX_ACK(configure_gps_command);
-  }
-  */
-  
+  #elif GPS_HWARE == GPS_HWARE_CASIC
+   
+   //
+   //  Ask for only GGA and RMC on the CASIC/Noeway Chips
+   //
+
+   Serial3.println("$PCAS03,1,0,0,0,1,0,0,0,0,0,0,0,0,0*02");
+  #endif
   
 }
 
@@ -1610,7 +1579,7 @@ void gps_read()
     {
       if(validate_and_maybe_remediate_gps_buffer())
       {
-        if(gps_read_buffer.indexOf(F("$GPRMC,")) == 0)
+        if(gps_read_buffer.indexOf(F("RMC,")) == 3)
         {
           #ifdef GPS_DEBUG_ON
           debug_info(F("--GPS BUF RMC--"));
@@ -1626,7 +1595,7 @@ void gps_read()
             parse_gps_buffer_as_rmc();
 	  }
         }
-        else if(gps_read_buffer.indexOf(F("$GPGGA,")) == 0)
+        else if(gps_read_buffer.indexOf(F("GGA,")) == 3)
         {
           #ifdef GPS_DEBUG_ON
           debug_info(F("--GPS BUF GGA--"));

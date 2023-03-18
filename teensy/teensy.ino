@@ -182,7 +182,7 @@ float           speed_vector[OUTLIER_VECTOR_SIZE];
 //#define		VOLTAGE_DIVIDER 37.213 		//  Use to get from AnalogRead() to voltage estimate
 //#define		VOLTAGE_DIVIDER 16.123 		//  Use to get from AnalogRead() to voltage estimate
 #define		VOLTAGE_DIVIDER 23.5233 		//  Use to get from AnalogRead() to voltage estimate
-
+#define         PUMP_VOLTAGE_THRESHOLD  7.0		//  Minimum voltage to register pump as "on"
 
 
 /*
@@ -1441,7 +1441,7 @@ void individual_pump_read(int pump_number, bool &state, int analog_input)
   #ifdef PUMP_DEBUG_ON
   debug_info(F("Pump ") + String(pump_number) + F(" on input ") + String(analog_input) + F(" reads "), pump_value);
   #endif
-  if(pump_value > 2.0)
+  if(pump_value > PUMP_VOLTAGE_THRESHOLD)
   {
      if(state == false)
      {
@@ -1853,7 +1853,7 @@ void gps_setup()
 
   //
   //	Configure in case the GPS is a MTK3339 / Ultimate GPS breakout from Adafruit
-  //
+	  //
 
   Serial1.begin(9600);
   delay(500);
@@ -1889,7 +1889,7 @@ void gps_setup()
       0x06, 0x24, 		// Message class and ID (class is configuration, id is navigation confiuration 
       0x24, 0x00, 		// 0x24 = 36 bytes in length of rest of message
       0xFF, 0xFF, 		// Mask (all on = apply all settings that follow)
-      0x06,			// Set Dynamic platform model to 6 ("at sea") 
+      0x05,			// Set Dynamic platform model to 5 ("at sea") 
       0x03, 			// Set fix mode to Auto 2D/3D
       0x00, 0x00, 0x00, 0x00,	// Fixed altitude for 2D Mode 
       0x10, 0x27, 0x00, 0x00, 	// Fixed altitude variance for 2D Mode 
@@ -1900,17 +1900,44 @@ void gps_setup()
       0x64, 0x00, 		// Position Accuracy Mask
       0x2C, 0x01, 		// Time Accuracy Mask
       0x1A, 			// Static Hold Threshold
+      //0x24, 			// Static Hold Threshold 40 Hex = 36 cm/s = 0.75 knot
+      //0x4D, 			// Static Hold Threshold 40 Hex = 77 cm/s = 1.5 knot
       0x00,			// DGPS timeout 
       0x00, 0x00, 0x00, 0x00, 	// Always zero
       0x00, 0x00, 0x00, 0x00, 	// Always zero
       0x00, 0x00, 0x00, 0x00, 	// Always zero
-      0x30, 0x48 };
+      0x2F, 0x26 };
   
     for(i=0; i < sizeof(configure_gps_command)/sizeof(uint8_t); i++)
     {
       Serial1.write(configure_gps_command[i]);
     }
     Serial1.println();
+
+    /*
+
+    //
+    //  Checksum calculation
+    //
+    uint8_t checka = 0;
+    uint8_t checkb = 0;
+
+    for(i = 2; i < 42; i++)
+    {
+       checka = checka + configure_gps_command[i];
+       checkb = checkb + checka;
+    }
+    
+    delay(2000);
+    Serial.print("CHECKSUM A IS ");
+    Serial.println(checka, HEX);
+
+    Serial.print("CHECKSUM B IS ");
+    Serial.println(checkb, HEX);
+    
+    */
+   
+
   
   #endif
 }

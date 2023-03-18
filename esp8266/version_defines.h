@@ -28,11 +28,11 @@
 //  Global defines
 //
 
-#define CELLULAR_CODE_ON	
-// #define N2K_CODE_ON 
+//#define CELLULAR_CODE_ON	
+//#define N2K_CODE_ON 
 
-//#define ESP8266_BAUD_RATE 256000
-#define ESP8266_BAUD_RATE 115200
+#define ESP8266_BAUD_RATE 256000
+//#define ESP8266_BAUD_RATE 115200
 
 
 
