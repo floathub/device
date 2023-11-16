@@ -179,10 +179,12 @@ float           speed_vector[OUTLIER_VECTOR_SIZE];
 #define         USER_RESET_REBOOT_TIME 5000	//  Hold down reset pin for 5 seconds to make device reboot
 #define         USER_RESET_FACTORY_TIME 20000	//  Hold down reset pin for 20 seconds to make device factory reset
 #define		MAX_SEND_MESSAGE_FAILURES 5
-//#define		VOLTAGE_DIVIDER 37.213 		//  Use to get from AnalogRead() to voltage estimate
-//#define		VOLTAGE_DIVIDER 16.123 		//  Use to get from AnalogRead() to voltage estimate
-#define		VOLTAGE_DIVIDER 23.5233 		//  Use to get from AnalogRead() to voltage estimate
 #define         PUMP_VOLTAGE_THRESHOLD  7.0		//  Minimum voltage to register pump as "on"
+
+//#define		VOLTAGE_DIVIDER 37.213 		 //  Use to get from AnalogRead() to voltage estimate
+//#define		VOLTAGE_DIVIDER 16.123 		 //  Use to get from AnalogRead() to voltage estimate
+#define		VOLTAGE_DIVIDER 23.5233          //  Use to get from AnalogRead() to voltage estimate
+//#define		VOLTAGE_DIVIDER 15.047 		        //  Use to get from AnalogRead() to voltage estimate
 
 
 /*
@@ -1441,7 +1443,17 @@ void individual_pump_read(int pump_number, bool &state, int analog_input)
   #ifdef PUMP_DEBUG_ON
   debug_info(F("Pump ") + String(pump_number) + F(" on input ") + String(analog_input) + F(" reads "), pump_value);
   #endif
+
+
+  //float temp_voltage_threshold = PUMP_VOLTAGE_THRESHOLD;
+  //if(pump_number == 1)
+  //{
+  //  temp_voltage_threshold = 0.20;
+  //}
+
+
   if(pump_value > PUMP_VOLTAGE_THRESHOLD)
+  //if(pump_value > temp_voltage_threshold)
   {
      if(state == false)
      {
@@ -1645,6 +1657,7 @@ void report_state(bool console_only)
   possibly_append_data(charger_one, 1.0, F(",C1:"));
   possibly_append_data(charger_two, 1.0, F(",C2:"));
   possibly_append_data(charger_three, 1.0, F(",C3:"));
+
 
   //
   //	Add NMEA data
