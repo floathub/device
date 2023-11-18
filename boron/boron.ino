@@ -17,7 +17,7 @@
 
 SYSTEM_THREAD(ENABLED);
 
-//#define DEBUG_ON
+#define DEBUG_ON
 #define MAX_LATEST_MESSAGE_SIZE      512
 #define HOUSEKEEPING_INTERVAL        1000      // Check our network status and do other core tasks once every second
 #define MESSAGE_COMPLETION_LIMIT     60000     // If we can't assemble a whole message within 1 minute, assume it is garbled and toss it
