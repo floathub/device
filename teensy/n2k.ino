@@ -815,7 +815,6 @@ void HandleAISClassBStaticPartB(const tN2kMsg &N2kMsg)
 
 void n2k_output()
 {
-
   if (n2k_location_timestamp + N2K_RAPID_VALID_DURATION < millis())
   {
     n2k_gps_valid = false;
@@ -907,7 +906,6 @@ void n2k_output()
     }
   }
 
-
   //
   // Output whatever we can as NMEA0183 based on the N2K data at hand
   //
@@ -915,7 +913,6 @@ void n2k_output()
   tNMEA0183Msg NMEA0183Msg;
   if(n2k_output_cycle == 0 && n2k_fix_valid)
   {
-
     if ( NMEA0183SetGGA(NMEA0183Msg, n2k_fix_seconds, n2k_latitude, n2k_longitude,
                         1, n2k_siv, n2k_hdp, n2k_altitude - n2k_fix_geosep, 
                         n2k_fix_geosep, NMEA0183DoubleNA, NMEA0183UInt32NA) )
